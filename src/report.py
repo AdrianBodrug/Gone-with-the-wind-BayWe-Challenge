@@ -172,11 +172,11 @@ def export_timeseries(result: AssessmentResult) -> pd.DataFrame:
         d.insert(0, "turbine", t.turbine)
         d["energy_kwh"] = d["power_kw"] / 6
         frames.append(d)
-    out = pd.concat(frames, ignore_index=True)
-    return out.rename(columns={
+    out = pd.concat(frames, ignore_index=True).rename(columns={
         "ws_pred": "wind_speed_pred_ms", "ws_p10": "wind_speed_p10_ms", "ws_p90": "wind_speed_p90_ms",
         "power_kw": "expected_power_kw", "power_p10_kw": "power_at_ws_p10_kw",
-        "power_p90_kw": "power_at_ws_p90_kw"}).round({c: 4 for c in out.columns if out[c].dtype.kind == "f"})
+        "power_p90_kw": "power_at_ws_p90_kw"})
+    return out.round({c: 4 for c in out.columns if out[c].dtype.kind == "f"})
 
 
 # ================================================================ charts
