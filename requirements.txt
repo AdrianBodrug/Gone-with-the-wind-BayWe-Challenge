@@ -1,0 +1,14 @@
+# Model (src/)
+pandas>=2.0
+numpy>=1.24
+scipy>=1.10
+openpyxl>=3.1
+
+# GUI (app.py)
+streamlit>=1.30
+plotly>=5.18
+
+# Notebook (notebooks/)
+matplotlib>=3.7
+scikit-learn>=1.3
+ipykernel>=6.25
