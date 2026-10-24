@@ -3,7 +3,7 @@
     python server.py                  # http://localhost:8000
     python server.py --port 8080 --data data
     python server.py --reload         # re-import src/ on every request (while changing the model)
-    HOST=0.0.0.0 PORT=7860 python server.py   # cloud hosting (Dockerfile, Hugging Face Space)
+    HOST=0.0.0.0 PORT=7860 python server.py   # reachable from other machines (used by the Dockerfile)
 
 GET  /             the page, switched to the backend engine
 GET  /health       status + turbines the server has on disk

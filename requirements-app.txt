@@ -1,4 +1,4 @@
-# What the web app (server.py) needs - used by the Dockerfile / Hugging Face Space.
+# What the web app (server.py) needs - used by the Dockerfile.
 # requirements.txt additionally has the notebook and Streamlit-example packages.
 pandas>=2.0
 numpy>=1.24
