@@ -11,7 +11,7 @@ The page POSTs to /api/claim the same analysis request it sends to /api/analyze
 The server reruns estimate_loss() (src/model.py) for every turbine of the target's park that
 is out in the window, builds the claim package with src/report.py and returns
 
-    {id, turbines, email: {subject, body}, energy_mwh, valuation, files: {report, data, valuation, zip}}
+    {id, turbines, energy_mwh (park total), window, valuation (market / eeg / ppa), email, files: {report}}
 
 Model runs are cached by (data, target, window, references) so re-generating after editing the
 form text is instant; only the email/PDF are rebuilt.
@@ -138,18 +138,17 @@ def claim(payload, store, out_root: Path = OUT_DIR) -> dict:
                        "provisional_share": round(v.share_provisional, 3),
                        "after_waiting_eur": None if v.eur_after_waiting is None else round(v.eur_after_waiting)}
     farm = result.farm_energy_kwh()
-    files = {k: f"/api/claim/{cid}/{Path(pkg[k]).name}" for k in ("report", "data", "valuation", "zip") if k in pkg}
+    rated = float(result.power_curve["power"].max())
     out = {
         "id": cid,
-        "turbines": [{"name": t.turbine, "p10_mwh": t.energy_kwh["p10"] / 1000, "p50_mwh": t.energy_kwh["p50"] / 1000,
-                      "p90_mwh": t.energy_kwh["p90"] / 1000} for t in result.turbines],
+        "turbines": [t.turbine for t in result.turbines],
+        "rated_mw": rated / 1000,
         "energy_mwh": {k: v / 1000 for k, v in farm.items()},
         "window": {"start": str(result.outage_start), "end_inclusive": str(result.outage_end),
                    "hours": result.duration_h},
-        "headline": (info.valuation_mode or "market"),
         "valuation": vals,
         "email": {"subject": pkg["email_subject"], "body": pkg["email_body"]},
-        "files": files,
+        "files": {"report": f"/api/claim/{cid}/{Path(pkg['report']).name}"},
     }
     return _clean(out)
 

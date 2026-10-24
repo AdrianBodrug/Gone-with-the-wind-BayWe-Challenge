@@ -91,25 +91,22 @@ code,pre{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}pre{backgroun
 document.addEventListener('windgap:result', e =&gt; e.detail)  // Zusammenfassung für Versicherungsformular
 WindGap.getSummary()                                    // aktuelles Ergebnis als JSON</pre></div></div>
 
-<div class="pg" id="versicherung"><h1>Versicherungsmeldung</h1><p class="sub">Aus der aktuellen Analyse eine Schadenmeldung erstellen: Das Python-Modell rechnet alle ausgefallenen Anlagen des Parks im gewählten Fenster, daraus entstehen E-Mail-Entwurf, PDF-Bericht und Daten-Export. Es wird nichts automatisch versendet.</p>
+<div class="pg" id="versicherung"><h1>Versicherungsmeldung</h1><p class="sub">Aus der aktuellen Analyse eine Schadenmeldung für den ganzen Windpark erstellen: Das Python-Modell rechnet alle ausgefallenen Anlagen im erkannten Ausfallfenster, daraus entstehen E-Mail-Entwurf und PDF-Bericht. Es wird nichts automatisch versendet.</p>
 <div class="lay"><aside>
 <div class="cd"><h2>Grundlage</h2><div id="ins-base" class="sm mu">Noch keine Analyse – zuerst im Tab „Analyse“ rechnen.</div></div>
 <div class="cd"><h2>1 · Windpark &amp; Betreiber</h2>
 <label style="margin-top:0">Windpark</label><input id="ic-wind_farm_name" placeholder="z. B. Windpark Musterfeld">
 <label>Standort</label><input id="ic-wind_farm_location" placeholder="optional">
-<label>Anlagentyp</label><input id="ic-turbine_model" placeholder="optional, z. B. 4,5 MW-Klasse">
 <label>Betreiber / Versicherungsnehmer</label><input id="ic-operator_name">
 <label>Ansprechpartner</label><input id="ic-contact_name">
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><label>E-Mail</label><input id="ic-contact_email" type="email"></div><div><label>Telefon</label><input id="ic-contact_phone"></div></div></div>
 <div class="cd"><h2>2 · Versicherung</h2>
 <label style="margin-top:0">Versicherer</label><input id="ic-insurer_name">
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><label>Policennummer</label><input id="ic-policy_number"></div><div><label>Schadennummer</label><input id="ic-claim_reference" placeholder="optional"></div></div>
-<label>Wartezeit / Selbstbehalt (h)</label><input id="ic-waiting_period_h" type="number" min="0" step="1" placeholder="optional, z. B. 24">
 <label>Ursache (Text für die Meldung, Englisch)</label><textarea id="ic-suspected_cause" rows="3" placeholder="leer = Standardtext: Kommunikationsausfall, Produktionsstopp vermutet, Ursache in Prüfung"></textarea>
 <label>Status / Reparatur</label><input id="ic-repair_status" placeholder="optional"></div>
-<div class="cd"><h2>3 · Vergütung</h2><div class="seg" id="ic-mode"><button class="on" data-v="market">Day-Ahead</button><button data-v="eeg">EEG</button><button data-v="ppa">PPA</button></div>
-<p class="sm mu" style="margin:8px 0 0">Alle drei Modelle werden berechnet; die Auswahl bestimmt die Hauptzahl.</p>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><label>Anzulegender Wert €/MWh</label><input id="ic-eeg_reference_value" type="number" min="0" step="0.01" placeholder="73,30 (Standard)"></div><div><label>PPA-Preis €/MWh</label><input id="ic-ppa_price" type="number" min="0" step="0.01" placeholder="73,13 (Standard)"></div></div></div>
+<div class="cd"><h2>3 · Vergütung</h2><p class="sm mu" style="margin:0">E-Mail und Bericht enthalten immer alle drei Modelle: Day-Ahead-Markt, EEG-Marktprämie und PPA. Vertragswerte eintragen, falls bekannt – leer = Marktbenchmark.</p>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><div><label>Anzulegender Wert €/MWh</label><input id="ic-eeg_reference_value" type="number" min="0" step="0.01" placeholder="73,30 (Benchmark)"></div><div><label>PPA-Preis €/MWh</label><input id="ic-ppa_price" type="number" min="0" step="0.01" placeholder="73,13 (Benchmark)"></div></div></div>
 <button class="btn p" id="ic-go">Meldung erstellen</button>
 <p class="sm mu" id="ic-status" style="margin:8px 0 0"></p></aside>
 <section id="ic-out"><div class="cd" id="ic-empty"><h2>Ergebnis</h2><span class="mu">Formular ausfüllen und „Meldung erstellen“ klicken. Leere Felder erscheinen in der Meldung als sichtbare [Platzhalter].</span></div></section></div>
@@ -214,33 +211,31 @@ $('rs').onclick=()=>{demo();run()};
 pg(['analyse','methode','integration','versicherung'].includes(location.hash.slice(1))?location.hash.slice(1):'analyse');demo();run();
 </script><script>
 /* ---- Versicherungsmeldung: /api/claim (src/claimapi.py) ---- */
-(()=>{const F=['wind_farm_name','wind_farm_location','turbine_model','operator_name','contact_name','contact_email','contact_phone','insurer_name','policy_number','claim_reference','waiting_period_h','suspected_cause','repair_status','eeg_reference_value','ppa_price'];
-let MODE='market',LAST=null;const eur=v=>v==null?'–':'€ '+fm(v),mwh=v=>fm(v,1)+' MWh';
-try{const sv=JSON.parse(localStorage.getItem('windgap-claim')||'{}');F.forEach(k=>{if(sv[k]!=null)$('ic-'+k).value=sv[k]});if(sv.mode)MODE=sv.mode}catch(_){}
-const syncMode=()=>document.querySelectorAll('#ic-mode button').forEach(b=>b.classList.toggle('on',b.dataset.v==MODE));syncMode();
-$('ic-mode').onclick=e=>{const b=e.target.closest('button');if(!b)return;MODE=b.dataset.v;syncMode()};
-function base(){if(!R){$('ins-base').innerHTML='Noch keine Analyse – zuerst im Tab „Analyse“ rechnen.';return}
- $('ins-base').innerHTML=`Zielturbine <b>${R.t}</b> · ${fd(R.a)} → ${fd(R.b)} (${fm(R.n*S.step/36e5,1)} h)<br>Referenzen ${R.auto?'automatisch':'manuell: '+[...SEL.refs].join(', ')} · Analyse: <b>${fm(R.energy)} kWh</b>`+(CFG.mode=='api'?'':'<br><span class="wa">Nur mit Python-Backend (python server.py) verfügbar.</span>')}
+(()=>{const F=['wind_farm_name','wind_farm_location','operator_name','contact_name','contact_email','contact_phone','insurer_name','policy_number','claim_reference','suspected_cause','repair_status','eeg_reference_value','ppa_price'];
+const eur=v=>v==null?'–':'€ '+fm(v),mwh=v=>fm(v,1)+' MWh';
+try{const sv=JSON.parse(localStorage.getItem('windgap-claim')||'{}');F.forEach(k=>{if(sv[k]!=null)$('ic-'+k).value=sv[k]})}catch(_){}
+// turbines of the target's park that are out in the window (same rule as the server: >50 % missing)
+function affected(){if(!R)return[];const p=park(R.t);return S.names.filter(n=>park(n)===p&&S.pc[n]&&(n===R.t||(()=>{let m=0;for(let i=R.a;i<R.b;i++)if(!(S.v[n][i]===S.v[n][i]))m++;return m/(R.b-R.a)>.5})()))}
+const rated=n=>{const c=S.pc[n];return c?Math.max(...c.map(x=>x[1]))/1000:null};
+function base(){if(!R){$('ins-base').innerHTML='Noch keine Analyse – zuerst im Tab „Analyse“ rechnen.';return}const A=affected(),rt=rated(R.t);
+ $('ins-base').innerHTML=`Windpark <b>${park(R.t)}</b> · ${A.length} Anlage(n) ausgefallen: <b>${A.join(', ')}</b><br>Ausfallfenster (automatisch erkannt): ${fd(R.a)} → ${fd(R.b)} · <b>${fm(R.n*S.step/36e5,1)} h</b>${rt?`<br>Nennleistung je Anlage ${fm(rt,1)} MW (aus der Leistungskurve)`:''}<br><span class="sm">Gesamtverlust wird beim Erstellen für alle betroffenen Anlagen berechnet.</span>`+(CFG.mode=='api'?'':'<br><span class="wa">Nur mit Python-Backend (python server.py) verfügbar.</span>')}
 document.addEventListener('windgap:result',base);base();
-function payload(){const P={target:R.t,window:{start:new Date(S.t0+R.a*S.step).toISOString(),end:new Date(S.t0+R.b*S.step).toISOString()},reference:R.auto?'auto':[...SEL.refs],power_curves:S.pc,claim:{valuation_mode:MODE}};
+function payload(){const P={target:R.t,window:{start:new Date(S.t0+R.a*S.step).toISOString(),end:new Date(S.t0+R.b*S.step).toISOString()},reference:R.auto?'auto':[...SEL.refs],power_curves:S.pc,claim:{}};
  if(CFG.send)P.data={t0:new Date(S.t0).toISOString(),step_min:S.step/6e4,series:Object.fromEntries(S.names.map(n=>[n,Array.from(S.v[n],x=>x===x?x:null)]))};
  F.forEach(k=>{const v=$('ic-'+k).value.trim();if(v!=='')P.claim[k]=v});return P}
 $('ic-go').onclick=async()=>{if(!R)return toast('Zuerst eine Analyse rechnen.');if(CFG.mode!='api')return toast('Die Meldung braucht das Python-Backend: python server.py starten und die Seite darüber öffnen.');
- try{localStorage.setItem('windgap-claim',JSON.stringify({...Object.fromEntries(F.map(k=>[k,$('ic-'+k).value])),mode:MODE}))}catch(_){}
- const b=$('ic-go');b.disabled=true;b.textContent='Modell rechnet …';$('ic-status').textContent='Alle ausgefallenen Anlagen des Parks werden mit dem Python-Modell gerechnet (beim ersten Mal ca. 20–40 s).';$('ic-out').classList.add('ld');
- try{const x=await fetch(CFG.base+'/api/claim',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())});const r=await x.json();if(!x.ok)throw Error(r.error||('HTTP '+x.status));LAST=r;show(r);$('ic-status').textContent='Fertig – bitte vor dem Versand prüfen.'}
+ try{localStorage.setItem('windgap-claim',JSON.stringify(Object.fromEntries(F.map(k=>[k,$('ic-'+k).value]))))}catch(_){}
+ const b=$('ic-go');b.disabled=true;b.textContent='Modell rechnet …';$('ic-status').textContent='Alle ausgefallenen Anlagen des Parks werden mit dem Python-Modell gerechnet (beim ersten Mal ca. 10–40 s).';$('ic-out').classList.add('ld');
+ try{const x=await fetch(CFG.base+'/api/claim',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload())});const r=await x.json();if(!x.ok)throw Error(r.error||('HTTP '+x.status));show(r);$('ic-status').textContent='Fertig – bitte vor dem Versand prüfen.'}
  catch(e){toast('Meldung fehlgeschlagen: '+e.message);$('ic-status').textContent=''}finally{b.disabled=false;b.textContent='Meldung erstellen';$('ic-out').classList.remove('ld')}};
-function show(r){const V=r.valuation||{},h=V[r.headline]||V.market||Object.values(V)[0],E=r.energy_mwh;
- const vrow=k=>{const v=V[k];if(!v)return`<tr><td>${k}</td><td colspan="3" class="mu">nicht verfügbar</td></tr>`;return`<tr><td>${v.label}${k==r.headline?' ★':''}${v.default_price?' <span class="sm mu">(Standardpreis)</span>':''}</td><td>${eur(v.eur.p50)}</td><td>${eur(v.eur.p10)} – ${eur(v.eur.p90)}</td><td>${fm(v.eur_per_mwh,2)}</td></tr>`};
- $('ic-out').innerHTML=`<div class="kp"><div class="k h"><small>Energieverlust Park (P50)</small><div>${mwh(E.p50)}</div><span>Bandbreite ${fm(E.p10,1)} – ${fm(E.p90,1)} MWh</span></div>
- <div class="k"><small>Wert (${h?h.label:'–'})</small><div>${h?eur(h.eur.p50):'–'}</div><span>${h&&h.after_waiting_eur!=null?'nach Wartezeit '+eur(h.after_waiting_eur):(h&&h.provisional_share>0?Math.round(h.provisional_share*100)+' % vorläufig bepreist':'&nbsp;')}</span></div>
- <div class="k"><small>Anlagen</small><div>${r.turbines.length}</div><span>${r.turbines.map(t=>t.name).join(', ')} · ${fm(r.window.hours,1)} h</span></div></div>
- <div class="cd"><h2>Anlagen</h2><div class="ov"><table><tr><th>Anlage</th><th>P10</th><th>P50</th><th>P90</th></tr>${r.turbines.map(t=>`<tr><td>${t.name}</td><td>${fm(t.p10_mwh,1)}</td><td><b>${fm(t.p50_mwh,1)}</b></td><td>${fm(t.p90_mwh,1)}</td></tr>`).join('')}</table></div><p class="lg">MWh, Python-Modell (src/model.py) – identisch mit der Analyse für die gewählte Zielturbine.</p></div>
- <div class="cd"><h2>Vergütung</h2><div class="ov"><table><tr><th>Modell</th><th>€ P50</th><th>€ P10 – P90</th><th>€/MWh</th></tr>${['market','eeg','ppa'].map(vrow).join('')}</table></div></div>
- <div class="cd"><h2>E-Mail-Entwurf</h2><label style="margin-top:0">Betreff</label><input id="ic-subj" value="${r.email.subject.replace(/"/g,'&quot;')}"><label>Text</label><textarea id="ic-body" rows="18" style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px"></textarea>
- <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn" id="ic-copy">Kopieren</button><button class="btn" id="ic-mail">In Mail-App öffnen</button></div><p class="sm mu" style="margin:8px 0 0">Entwurf zur Prüfung – Anhänge (PDF, CSV) bitte manuell anfügen.</p></div>
- <div class="cd"><h2>Dateien</h2><div style="display:flex;gap:8px;flex-wrap:wrap">${[['report','PDF-Bericht'],['data','Zeitreihe (CSV)'],['valuation','Bewertung (CSV)'],['zip','Alles (ZIP)']].filter(([k])=>r.files[k]).map(([k,l])=>`<a class="btn" style="text-decoration:none;display:inline-flex;align-items:center" href="${CFG.base+r.files[k]}" download>${l}</a>`).join('')}</div></div>`;
- $('ic-body').value=r.email.body;
+function show(r){const V=r.valuation||{},E=r.energy_mwh,lab={market:'Day-Ahead-Markt',eeg:'EEG-Marktprämie',ppa:'PPA (Festpreis)'};
+ const vrow=k=>{const v=V[k];if(!v)return`<tr><td>${lab[k]}</td><td colspan="3" class="mu">keine Preisdaten</td></tr>`;return`<tr><td>${lab[k]}${v.unit_price?` <span class="sm mu">(${fm(v.unit_price,2)} €/MWh${v.default_price?', Benchmark':''})</span>`:''}</td><td><b>${eur(v.eur.p50)}</b></td><td>${eur(v.eur.p10)} – ${eur(v.eur.p90)}</td><td>${fm(v.eur_per_mwh,2)}</td></tr>`};
+ $('ic-out').innerHTML=`<div class="kp"><div class="k h"><small>Energieverlust Windpark (P50)</small><div>${mwh(E.p50)}</div><span>Bandbreite ${fm(E.p10,1)} – ${fm(E.p90,1)} MWh</span></div>
+ <div class="k"><small>Ausfall</small><div>${fm(r.window.hours,1)} h</div><span>${r.turbines.length} Anlagen · ${r.turbines.join(', ')}</span></div></div>
+ <div class="cd"><h2>Wert des Verlusts <small>alle drei Vergütungsmodelle</small></h2><div class="ov"><table><tr><th>Modell</th><th>€ P50</th><th>€ P10 – P90</th><th>€/MWh</th></tr>${['market','eeg','ppa'].map(vrow).join('')}</table></div><p class="lg">Python-Modell (src/model.py), Summe aller betroffenen Anlagen. Erscheint so in E-Mail und Bericht.</p></div>
+ <div class="cd"><h2>E-Mail-Entwurf</h2><label style="margin-top:0">Betreff</label><input id="ic-subj"><label>Text</label><textarea id="ic-body" rows="18" style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px"></textarea>
+ <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn" id="ic-copy">Kopieren</button><button class="btn" id="ic-mail">In Mail-App öffnen</button><a class="btn" style="text-decoration:none;display:inline-flex;align-items:center" href="${CFG.base+r.files.report}" download>PDF-Bericht herunterladen</a></div><p class="sm mu" style="margin:8px 0 0">Entwurf zur Prüfung – den PDF-Bericht als Anhang beifügen.</p></div>`;
+ $('ic-subj').value=r.email.subject;$('ic-body').value=r.email.body;
  $('ic-copy').onclick=async()=>{const t='Subject: '+$('ic-subj').value+'\n\n'+$('ic-body').value;try{await navigator.clipboard.writeText(t);toast('E-Mail kopiert.')}catch(_){$('ic-body').select();document.execCommand('copy');toast('E-Mail kopiert.')}};
  $('ic-mail').onclick=()=>{location.href='mailto:?subject='+encodeURIComponent($('ic-subj').value)+'&body='+encodeURIComponent($('ic-body').value)}}
 })();

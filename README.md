@@ -187,8 +187,8 @@ requirements.txt
 ```bash
 pip install -r requirements.txt
 python -m scripts.make_claim_package                                  # demo claim package -> outputs/
-python -m scripts.make_claim_package --waiting-hours 24                      # all 3 valuations, market as headline
-python -m scripts.make_claim_package --valuation eeg --eeg 73.3 --ppa 70     # operator's own contract prices
+python -m scripts.make_claim_package                                  # email + PDF, all 3 valuations
+python -m scripts.make_claim_package --eeg 73.3 --ppa 70              # operator's own contract prices
 python server.py                                                      # web app -> http://localhost:8000
 python server.py --reload                                             # same, re-imports src/ on every request
 ```
@@ -238,4 +238,4 @@ All three remuneration models are always calculated and shown side by side (PDF 
 
 ## 12. Insurance tab (`/api/claim`)
 
-`python server.py` → tab **Versicherung**: fill in the form → **Meldung erstellen**. The server reruns the model for every turbine of the park that is out in the selected window (same data, window and reference choice as the analysis), then returns the email draft (copy / open in mail app) and download links for the PDF report, CSVs and a ZIP. Editing the form and regenerating reuses the model run (~2 s). Nothing is sent automatically.
+`python server.py` → tab **Versicherung**. The outage window, its duration, the affected turbines (every turbine of the park that is out in the window) and their rated power come from the analysis and the data – nothing to type in. The form only asks for what no data file contains: wind farm / operator / insurer details and, optionally, the EEG reference value and PPA price (empty = market benchmarks). **Meldung erstellen** reruns the model for the whole park and returns the email draft (copy / open in mail app) and the PDF report. Email and PDF always show the **wind-farm total** and **all three remuneration models** (day-ahead, EEG market premium, PPA); the per-turbine breakdown is only in the PDF appendix. Editing the form and regenerating reuses the model run (~2 s). Nothing is sent automatically.
