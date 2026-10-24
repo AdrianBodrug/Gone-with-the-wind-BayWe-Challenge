@@ -74,12 +74,27 @@ One equation per target turbine:
 v_target(t) = b0 + w1 · v_H1(t + lag1) + w2 · v_O1(t + lag2) + … + corrections
 ```
 
-1. **Clean the data.** Rows where every channel is 0 are sensor faults, not calm wind, so they become missing values. Missing values are never read as zero. Short gaps in the reference series (≤ 30 min) are bridged; the target series is never filled.
-2. **Align the references.** Each reference turbine is shifted by the time lag at which it matches the target best (−60 … +60 min) and smoothed over 130 min. A weather front reaches one park before the other, and the smoothing removes local gusts that cannot be transferred between parks.
-3. **Pick the references automatically.** All candidate turbines from other parks are fitted together with weights ≥ 0. A reference with weight 0 adds nothing beyond the others; a turbine is used if its weight is above 0.02. This covers the "automatic turbine selection" bonus.
-4. **Add corrections only if they help.** Wind direction (wake effects), turbulence, time of day and temperature change are tried one at a time. Each is kept only if it lowers the cross-validated error by at least 0.2 %.
+1. **Clean the data.** See [Missing data](#missing-data) below. Missing values are never read as zero, and the target series is never filled.
+2. **Align the references.** Each reference turbine is shifted by the time lag at which it matches the target best: the highest correlation of the 10-min values, searched from −60 to +60 min, without the test week and the outage. The lag is the time of the reference reading relative to the target time. **+30 min** means the target at 12:00 is matched with the reference reading from 12:30: the wind reaches the target first and the reference 30 min later. **−30 min** means the reading from 11:30. The references are then smoothed with a centred moving average over 30, 70 or 130 min, whichever fits the test week best for that turbine. A reference far away cannot see the target's local gusts, and its own gusts are noise for the target. Smoothing removes them, and it keeps the model robust to a lag that is off by 10–20 min.
+3. **Pick the references automatically.** Forward selection on the shown test week (4–9 Sep), with the model fitted without that week. The model starts with the single reference that predicts the week best, then keeps adding the reference that lowers the error most. It stops when the next one gains less than 0.5 %. The score is the mean of wind RMSE, wind MAE, power RMSE and power MAE relative to a model with all references. Weights are ≥ 0. Only references measured during the outage (≥ 90 % of its steps) are candidates. This covers the "automatic turbine selection" bonus.
+4. **Add corrections only if they help.** Direction curve (wake), wind direction, turbulence, time of day, temperature change and weather terms (temperature, air pressure, air density, turbulence intensity) are tried the same way. Each is kept only if it lowers the test-week score by at least 0.5 %. The final model is then refitted on all data outside the outage.
 5. **Convert wind into energy.** The predicted wind goes through the power curve, averaged over the model's own error distribution ("expected power"). That matters because the power curve is non-linear. Using the point prediction alone would underestimate the energy by about 125–145 MWh per turbine over the three months of data.
 6. **Attach an honest range.** P10/P90 come from how far the model's energy estimate was off on past 3-day blocks it had not seen.
+
+### Missing data
+
+- **One 10-min grid** for all files: absent rows become gaps, never 0.
+- **Cleaning** sets these to missing:
+  - rows with 0.0 m/s in every channel (logger fault);
+  - impossible values (wind < 0 or > 40 m/s, direction outside 0–360°);
+  - a stuck wind sensor (the same value for ≥ 1 h);
+  - a constant air pressure (O park placeholder).
+- **Short reference gaps (≤ 30 min)** are interpolated linearly: wind speed, temperature, air pressure and turbulence. Wind direction is filled via its sin/cos, so 350° → 10° passes through 0°. The target turbine is never filled.
+- **Smoothing** also bridges single missing values: the moving average needs only just over half of its window.
+- **Training** leaves out steps without a target measurement. With 30 % of T1's rows removed at random, the test-week wind RMSE moves from 1.381 to 1.386 m/s.
+- **References during the outage:** only references measured in ≥ 90 % of the outage steps are candidates. Steps where a selected one is still missing use a model with the references available then (`model_used` in the CSV).
+- **Corrections** are only offered if more than 50 % of their data is present. Turbulence and weather are averages over the references that have them. Without these channels the model runs on wind speed alone (T1 test-week RMSE 1.38 → 1.53 m/s).
+- **No reference data at all:** nothing is estimated. Such gaps are not offered as outages, and the analysis stops if more than half of the window cannot be reconstructed.
 
 Why a linear model: in our early experiments a gradient-boosting model was not more accurate in cross-validation (wind RMSE 1.16 vs 1.15 m/s). Wind at the target correlates with the reference parks at only about 0.7. That limit holds for any model. The brief also asks for explainability over accuracy when the two conflict. Here there was no conflict, so we kept the version that anyone can recompute.
 

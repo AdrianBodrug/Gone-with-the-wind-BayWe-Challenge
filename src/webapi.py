@@ -215,6 +215,7 @@ def analyze(payload, store):
         "rank": [{"n": r["ref"], "r": r["corr"], "weight": r["weight"], "used": r["used"]} for r in table],
         "reference_table": table,
         "filled_steps": int(missing.sum()),
+        "model_used": p["model_used"].tolist(),
         "energy_kwh": e,
         "model": {
             "type": "bounded-linear", "intercept": m["intercept"],
@@ -225,6 +226,7 @@ def analyze(payload, store):
             "selection_basis": m["selection_basis"],
             "selection_path": [{**p_, "label": FEATURE_LABELS.get(p_["step"], p_["step"])} for p_ in m["selection_path"]],
             "n_train": m["n_train"], "cv_blocks": m["n_cv_blocks"], "window_min": m["window_min"],
+            "fallback": m["fallback"], "n_fallback_steps": m["n_fallback_steps"],
             "time_shift_h": shift.total_seconds() / 3600,
         },
         "metrics": {

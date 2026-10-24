@@ -11,6 +11,9 @@ test week 4-9 Sep, with the model fitted without that week:
   2. extra features, forward: same for direction, time of day, turbulence, weather, ...
   each stage stops when the best step improves the score by less than MIN_GAIN.
   score = mean of wind RMSE, wind MAE, power RMSE, power MAE relative to "all references".
+Only references measured during the outage (>= OUTAGE_COVER of its steps) are candidates. Steps
+where a chosen reference is still missing are predicted by a fallback model refitted on the inputs
+available at that step (other chosen references, else any measured reference).
 If the outage overlaps the test week, or the data do not cover it, the 6 days right after
 (else before) the outage are used instead. The final model is refitted on all data outside
 the outage. Reported metrics are those of the selection period. Leave-one-3-day-block-out
@@ -31,6 +34,7 @@ MAX_LAG = 6                  # search reference lags of -60..+60 min
 BLOCK_DAYS = 3               # block length for the uncertainty estimate, same as the hidden test outage
 MIN_GAIN = 0.005             # keep a selection step only if the score improves by >= 0.5 %
 SELECTION_DAYS = 6
+OUTAGE_COVER = 0.9          # a reference is a candidate only if measured in >= 90 % of the outage steps
 TEST_WEEK = (pd.Timestamp("2026-09-04 00:00"), pd.Timestamp("2026-09-10 00:00"))   # shown test week, end exclusive
 HARMONICS = (2, 3, 4)
 WEATHER = ("temperature", "temp_anomaly", "pressure", "pressure_change_3h", "air_density", "turb_intensity")
@@ -49,7 +53,7 @@ EXTRA_GROUPS = {
 
 @dataclass
 class LossResult:
-    predictions: pd.DataFrame   # timestamp, ws_pred, ws_p10, ws_p90, power_expected
+    predictions: pd.DataFrame   # timestamp, ws_pred, ws_p10, ws_p90, power_expected, model_used
     energy_kwh: dict            # p10, p50, p90
     metrics: dict               # selection period: ws_rmse, ws_mae, p_rmse, p_mae, energy_dev_kwh/pct, r2, ...
     method: dict                # references, lags, coefficients, selection path, ...
@@ -240,6 +244,33 @@ def _block_energy_errors(y, p_pred, block_id, pc, min_frac=0.5):
     return np.array(errs)
 
 
+def fallback_predict(F, cols, ref_cols, other_ref_cols, y, fit_mask, todo):
+    """Predict the `todo` steps, where the main model lacks an input, with a model refitted on the
+    inputs available at each step: the chosen references (and corrections) that are there, else any
+    measured reference. Returns (prediction, label per step, [{references, corrections, steps, start, end}])."""
+    pred = pd.Series(np.nan, index=y.index)
+    label = pd.Series(None, index=y.index, dtype=object)
+    patterns = {}
+    for ts, row in F.loc[todo, list(dict.fromkeys(cols + other_ref_cols))].notna().iterrows():
+        use = [c for c in cols if row[c]]
+        if not any(c in ref_cols for c in use):           # no chosen reference: any measured reference
+            use = [c for c in other_ref_cols if row[c]]
+        if use:
+            patterns.setdefault(tuple(use), []).append(ts)
+    info = []
+    for use, steps in sorted(patterns.items(), key=lambda kv: -len(kv[1])):
+        refs_used = [c[3:] for c in use if c.startswith("ws_")]
+        try:
+            _, p, _ = fit_predict(F, list(use), y, fit_mask, [c for c in use if c.startswith("ws_")])
+        except ValueError:                                 # too little training data for this combination
+            continue
+        pred[steps] = p[steps]
+        label[steps] = "fallback: " + ", ".join(refs_used)
+        info.append({"references": refs_used, "corrections": any(not c.startswith("ws_") for c in use),
+                     "steps": len(steps), "start": str(min(steps)), "end": str(max(steps))})
+    return pred, label, info
+
+
 def _py(x):
     """numpy scalars -> plain Python so the frontend can json.dumps the result."""
     return x.item() if isinstance(x, np.generic) else x
@@ -279,6 +310,10 @@ def estimate_loss(target, references, power_curve, outage, *,
     pool = [r for r in pool if refs[r]["wind_speed"][fit_sel].notna().mean() >= 0.5]   # enough overlapping data
     if not pool:
         raise ValueError("No reference turbine has enough data overlapping the target.")
+    cover = {r: float(refs[r]["wind_speed"][in_outage].notna().mean()) for r in refs}
+    pool = [r for r in pool if cover[r] >= OUTAGE_COVER] or [r for r in pool if cover[r] > 0]   # else whatever is there
+    if not pool:
+        raise ValueError("No reference turbine has data during the outage.")
 
     lags, corrs = {}, {}
     for r in refs:
@@ -358,6 +393,12 @@ def estimate_loss(target, references, power_curve, outage, *,
 
     # 5. final fit on all data outside the outage
     model, ws_fit, n_fit = fit_predict(F, cols, y, train, ref_cols)
+    used = pd.Series(np.where(ws_fit.notna(), "main", None), index=idx, dtype=object)
+    todo = in_outage & ws_fit.isna()
+    fallback = []
+    if todo.any():                                         # a chosen reference is missing at some outage steps
+        fb_pred, fb_label, fallback = fallback_predict(F, cols, ref_cols, [f"ws_{r}" for r in refs], y, train, todo)
+        ws_fit, used = ws_fit.fillna(fb_pred), used.where(used.notna(), fb_label)
     ws_out = ws_fit[in_outage]
     q10, q90 = np.quantile(residuals, [0.1, 0.9])
     p_exp = expected_power(ws_out.to_numpy(), residuals, pc)
@@ -367,6 +408,7 @@ def estimate_loss(target, references, power_curve, outage, *,
         "ws_p10": np.clip(ws_out.to_numpy() + q10, 0, None),
         "ws_p90": ws_out.to_numpy() + q90,
         "power_expected": p_exp,
+        "model_used": used[in_outage].to_numpy(),
     })
     p50 = energy_kwh(p_exp)
     # true ~ estimate / (1 + past relative error): large past over-estimates give the low end
@@ -385,7 +427,8 @@ def estimate_loss(target, references, power_curve, outage, *,
                          "order": chosen.index(r) + 1 if r in chosen else None,
                          "weight": float(coef.get(f"ws_{r}", 0.0)),
                          "share_pct": float(coef.get(f"ws_{r}", 0.0) / total_w * 100),
-                         **({} if r in pool else {"note": "too little overlapping data"})}
+                         **({} if r in pool else {"note": f"missing during the outage ({cover[r]:.0%} measured)"
+                                                    if cover[r] < OUTAGE_COVER else "too little overlapping data"})}
                         for r in refs], key=lambda q: (q["order"] or 99, -q["corr"]))
     method = {
         "description": ("Weighted sum (weights >= 0) of lag-aligned, "
@@ -405,6 +448,9 @@ def estimate_loss(target, references, power_curve, outage, *,
         "n_cv_blocks": int(block_id.max()) + 1,
         "n_outage_steps": int(in_outage.sum()),
         "n_missing_steps": int(ws_out.isna().sum()),
+        "n_fallback_steps": int(sum(f["steps"] for f in fallback)),
+        "fallback": fallback,
+        "outage_coverage": {r: round(cover[r], 4) for r in refs},
         "residual_p10_p90": [_py(q10), _py(q90)],
         "block_energy_error_p10_p90_pct": [_py(e_lo * 100), _py(e_hi * 100)],
         "selection_basis": {"kind": val_kind, "period": label, "min_gain_pct": min_gain * 100},

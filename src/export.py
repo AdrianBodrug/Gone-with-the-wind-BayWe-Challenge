@@ -45,6 +45,7 @@ def _prediction_table(run):
         "power_p10_kw": (power * lo_f).to_numpy(),                       # sums equal the P10 / P90 energy
         "power_p90_kw": (power * hi_f).to_numpy(),
         "energy_cum_kwh": (power.cumsum() / 6).to_numpy(),
+        "model_used": p["model_used"].where(~missing, "interpolated").to_numpy(),   # main / fallback: <refs> / interpolated
         "wind_speed_measured_ms": truth.to_numpy(),
         "power_measured_kw": pc.power(truth.to_numpy()),
     })
