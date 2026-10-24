@@ -18,7 +18,7 @@ import pandas as pd
 from .backtest import SHOWN_WEEK, split
 from .data_io import clean, load_folder
 from .energy import PowerCurve, expected_power
-from .model import WINDOW, _block_energy_errors, estimate_loss, make_blocks
+from .model import _block_energy_errors, estimate_loss, make_blocks
 from .outage import detect_outages
 from .schema import AssessmentResult, TurbineResult
 
@@ -32,6 +32,8 @@ EXTRA_LABELS = {
     "dir_harmonics": "wind-direction correction curve",
     "turbulence": "turbulence",
     "temp_change_3h": "3-hour temperature change",
+    "temperature": "temperature", "temp_anomaly": "temperature vs. daily mean", "pressure": "air pressure",
+    "pressure_change_3h": "3-hour pressure change", "air_density": "air density", "turb_intensity": "turbulence intensity",
 }
 
 
@@ -183,12 +185,12 @@ def assess(targets: dict, refs: dict, curves: dict, outage=None, input_files=Non
         f"For each affected turbine, the wind speed during the outage was reconstructed as a weighted "
         f"sum of wind speeds measured at reference turbines in other wind farms "
         f"({', '.join(sorted(used_refs))}). Each reference is first shifted by the time delay that best "
-        f"matches the target turbine and smoothed over {WINDOW * 10} minutes; all weights are forced "
-        f"to be non-negative. References"
-        + (f" and extra terms ({extras_txt})" if extras else "")
-        + " were kept only where they improved accuracy in cross-validation over 3-day blocks of "
-          "history. Lost energy is the turbine power curve averaged over the model's historical "
-          "error distribution."
+        f"matches the target turbine and smoothed over 30 to 130 minutes (chosen per turbine); all "
+        f"weights are forced to be non-negative. The smoothing, the references"
+        + (f" and the extra terms ({extras_txt})" if extras else "")
+        + " were selected step by step on the organisers' shown test week (4-9 Sep) with the model "
+          "fitted without that week, and kept only where they lowered the wind and power errors there. "
+          "Lost energy is the turbine power curve averaged over the model's historical error distribution."
     )
     first = next(iter(targets))
     return AssessmentResult(

@@ -8,6 +8,7 @@
 GET  /             the page, switched to the backend engine
 GET  /health       status + turbines the server has on disk
 POST /api/analyze  page request -> estimate_loss() -> page response (see src/webapi.py)
+POST /api/export   analysis request (+ targets) -> ZIP: CSV per turbine, park total, metrics (see src/export.py)
 POST /api/claim    analysis request + claim form -> email draft, PDF report, CSVs (see src/claimapi.py)
 GET  /api/claim/<id>/<file>   generated report (inline preview; ?download=1 to download)
 """
@@ -23,6 +24,7 @@ import src.assessment
 import src.claimapi
 import src.data_io
 import src.energy
+import src.export
 import src.model
 import src.pricing
 import src.report
@@ -80,14 +82,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         route = self.path.split("?")[0]
-        if route not in ("/api/analyze", "/api/claim"):
+        if route not in ("/api/analyze", "/api/claim", "/api/export"):
             return self._send(404, json.dumps({"error": "not found"}))
         try:
             payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
             if self.reload:
                 for mod in (src.data_io, src.energy, src.model, src.webapi,
-                            src.pricing, src.report, src.assessment, src.claimapi):
+                            src.pricing, src.report, src.assessment, src.claimapi, src.export):
                     importlib.reload(mod)
+            if route == "/api/export":
+                data, name = src.export.export_zip(payload, self.store)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+                self.send_header("Access-Control-Expose-Headers", "Content-Disposition")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(data)
+                return
             if route == "/api/claim":
                 result = src.claimapi.claim(payload, self.store)
             else:
