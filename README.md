@@ -1,241 +1,238 @@
-# BayWa r.e. Challenge — Wind Farm Outage Energy Loss Estimator
+# WindGap
 
-**WATT THE HACK 2026 · Munich Energy & AI Hackathon**
+**How much energy did a wind farm lose while it was offline?**
+WATT THE HACK 2026 (Munich) · BayWa r.e. challenge
 
-When the communication link to a wind farm drops, the farm may have stopped producing — and its own wind measurements are gone too. For **business interruption insurance claims**, BayWa r.e. needs to estimate how much energy was lost. Today this is done by hand using wind data from a neighbouring farm. **Our job: build a tool that automates it.**
+When the communication link to a wind farm drops, the farm may stop feeding in, and its own wind measurements disappear with the link. To file a business-interruption insurance claim, the operator still has to say how much energy was lost. Today an analyst estimates it by hand from a neighbouring farm's wind data.
 
----
+WindGap automates that estimate:
 
-## 1. The challenge in one picture
+1. It finds the outage in the data.
+2. It reconstructs the missing wind from reference wind farms that kept measuring.
+3. It turns that wind into lost energy with the turbines' power curve.
+4. It shows how far the method can be trusted.
+5. It drafts the insurance notification and a PDF report.
 
-```
- Reference parks (H, O)          Target park (T)               Power curve
- wind speed, direction  ──►  learn relationship  ──►  predicted wind  ──►  lost energy (kWh)
- (available during outage)   (from history)          during outage        + uncertainty
-```
+Everything runs locally in the browser.
 
-1. **Analyse** — learn how wind at the target park relates to wind at the reference parks, using historical data.
-2. **Predict** — apply that relationship to reference data during the outage to reconstruct the missing wind speeds.
-3. **Calculate** — run predicted wind through the turbine power curve to get the energy yield loss in kWh.
-
-## 2. Scoring
-
-| Weight | Criterion | What it means for us |
-|---|---|---|
-| **40%** | Model accuracy on hidden test data | Wind speed RMSE/MAE, power RMSE/MAE, deviation of summed energy |
-| **30%** | User experience | Clean, intuitive local web GUI |
-| **20%** | Solution concept | Clear, defensible methodology |
-| **10%** | Presentation | Pitch + demo |
-
-> ⚠️ **Explainability beats accuracy.** The brief says: if there is a trade-off between accuracy and explainability, prioritise explainability.
-
-## 3. Required deliverables
-
-**GUI** — runs locally in a standard web browser and shows:
-- [ ] Accuracy metrics (our choice)
-- [ ] Predicted wind speed time series
-- [ ] Explanation of the prediction method + its accuracy/uncertainty (e.g. correlation analysis)
-- [ ] Energy loss calculation in kWh
-- [ ] Energy loss visualisation
-
-**Inputs the tool must accept**
-- Wind data time series for reference and affected turbines (file upload)
-- Power curves of the target turbines
-- Outage period — **auto-detected from missing data**, with manual adjustment
-
-**Predictions** for the hidden test period, scored by the judges.
-
-**Bonus (if time permits)**
-- [ ] Insurance report — generate an email summarising the outage for the insurer
-- [ ] Additional parameters — use temperature, pressure, etc. to improve accuracy
-- [ ] Automatic turbine selection — tool picks the best reference turbines from the pool
+![Start page](docs/img/start.png)
 
 ---
 
-## 4. The data (`data/`)
+## Result for the hidden test window (1–3 Sep 2026, 72 h)
 
-10 turbines in 3 parks, **90 days (1 Jul – 30 Sep 2026)**, 10-minute averages at hub height. Files are `.xlsx`.
-
-| Park | Turbines | Role |
-|---|---|---|
-| **T** | T1, T2, T3 | **Targets** — predict these |
-| **H** | H1–H5 | Reference |
-| **O** | O1, O2 | Reference |
-
-**Columns:** `turbine_name`, `timestamp` (Berlin time), `wind_speed` (m/s), `wind_direction` (°), `ambient_temperature`, `air_pressure`, `wind_speed_stddev`, `test_set` (bool)
-
-**Power curves:** `T1/T2/T3_power_curve.xlsx` — all three are identical. Rated 4,500 (assumed kW) from 11.5 m/s; cut-in ~3 m/s; **no hard cut-out** — output derates gradually above 20 m/s down to 2,529 at 26 m/s.
-
-### Test period (from the organisers' README)
-
-| Period | Dates (inclusive) | Status |
-|---|---|---|
-| **Hidden test** | **1 – 3 Sep** | T1–T3 wind is NaN → **this is what we predict and get scored on** |
-| Shown test | 4 – 9 Sep | Real values available → our official validation week |
-| Training | everything else (Jul, Aug, 10–30 Sep) | Free to use |
-
-### Data gotchas
-
-- **All three T turbines are blanked simultaneously** in the hidden window → T2 cannot be used to predict T1. Only H and O parks are usable.
-- **The outage is in the middle of the data** → we can train on data from *both* sides of the gap.
-- **O park has no `wind_speed_stddev`**, and its `air_pressure` is a fake constant (990.27). Any model using these must handle that.
-- **Sensor-fault rows**: some rows have *every* channel = 0 (incl. 0 °C temperature in summer). Treat as missing, not as calm wind.
-- **Communication gaps**: multi-hour blocks of NaN in July (e.g. H1 ~16 h on 13–14 Jul; T1 5 h on 7 Aug). Random single NaNs everywhere.
-- **NaN ≠ zero.** Never interpret missing values as zero wind or zero power.
-- Range is Jul–Sep only → no daylight-saving switch inside the data.
-
----
-
-## 5. What we know so far (preliminary experiments)
-
-Validated on **27 fake 3-day outages** across the dataset (plus the shown test week):
-
-| Model | Wind RMSE (m/s) | Power RMSE (kW) | Abs. energy-sum error |
+| Turbine | Lost energy, P50 | Likely range (P10–P90) | Reference turbines the tool chose |
 |---|---|---|---|
-| **Linear: park means + ±30 min lags + O-park direction** | **1.15** | **646** | ~11% |
-| Gradient boosting (black box) | 1.16 | 648 | ~10% |
-| Linear per 45° direction sector | 1.19 | 667 | ~10% |
-| Linear on all 7 reference turbines | 1.21 | 685 | ~12% |
+| T1 | 89.8 MWh | 77.6 – 101.9 MWh | H1, H2, O1 |
+| T2 | 122.2 MWh | 111.0 – 142.9 MWh | H2, H3, H4, H5, O1, O2 |
+| T3 | 99.1 MWh | 84.1 – 110.7 MWh | H2, H4, H5, O1 |
+| **Park T** | **311.0 MWh** | **272.7 – 355.5 MWh** | |
 
-Takeaways:
-- **The explainable linear model ties the black box** (GBM wins only 41% of windows). → No accuracy/explainability trade-off; strong concept story.
-- Correlation between target and reference parks is only **~0.70** (10-min) / ~0.77 (hourly) → a floor on achievable accuracy. Communicate uncertainty, don't hide it.
-- **Variance-ratio MCP correction made things worse** on this data — don't use it.
-- **Expected power** (averaging the power curve over the model's error distribution instead of using the point prediction) slightly improves power RMSE and gives natural P10/P50/P90 bands.
-- First estimate for the hidden window: **≈ 314 MWh lost** across T1–T3 (T1 ≈ 89, T2 ≈ 126, T3 ≈ 98). The window was windier than average at the reference parks (7.5 vs 6.1 m/s).
+At the day-ahead prices of those hours, the lost energy is worth about **€41,500**.
+
+The 10-minute predictions (wind P10/P50/P90 and expected power per turbine) are written by `python -m src.backtest` (see [Run it](#run-it)).
 
 ---
 
-## 6. Task breakdown
+## Run it
 
-### Workstream A — Data & Model *(owner: ML lead — TBD)*
-
-- [ ] **A1 Loader** — read `.xlsx` and `.csv`; parse timestamps; align all turbines on one 10-min index.
-- [ ] **A2 Cleaning** — sensor-fault zeros → NaN; flag frozen/flat-lined values; short-gap interpolation for *reference* inputs only (never for targets).
-- [ ] **A3 Outage detection** — find NaN runs in the target series above a minimum length (e.g. ≥ 1 h); return list of `(start, end)`.
-- [ ] **A4 Baseline model** — linear regression: park-mean wind speeds (H, O) + lags (−3…+3 steps) + O-park direction (sin/cos interaction) + hour of day.
-- [ ] **A5 Validation harness** — blocked backtest: cut fake outages (6 h / 1 d / 3 d) at many positions, report all scored metrics. Also score on the shown test week (4–9 Sep).
-- [ ] **A6 Improvements (only keep if backtest improves)** — per-turbine vs. park-level references, direction sectors, temperature/air-density, turbulence (H only), challenger GBM.
-- [ ] **A7 Energy calculation** — power-curve interpolation; expected power over residual distribution; energy = Σ P × 10 min; P10/P50/P90.
-- [ ] **A8 Reference selection (bonus)** — rank candidate references by backtest error; optionally inverse-error weighted blend.
-- [ ] **A9 Final predictions** — fit on all non-hidden data, predict 1–3 Sep for T1–T3, export submission file in the format the judges want.
-
-### Workstream B — GUI & Report *(owner: Adrian)*
-
-- [ ] **B1 App skeleton** (Streamlit + Plotly) running on dummy output from day one.
-- [ ] **B2 Upload & setup** — upload turbine + power-curve files; pick target and reference turbines (or "auto").
-- [ ] **B3 Outage panel** — auto-detected outage shaded on the timeline; slider/date pickers to adjust.
-- [ ] **B4 Method & accuracy panel** — scatter target vs. reference with fit line, R², backtest metrics, plain-language "how this works".
-- [ ] **B5 Wind panel** — actual vs. predicted wind with uncertainty band; outage highlighted.
-- [ ] **B6 Energy panel** — lost kWh headline (P50 + P10–P90), per-turbine breakdown, cumulative-loss chart.
-- [ ] **B7 Insurance email (bonus)** — one-click summary email: farm, period, cause (comms loss), method, lost energy with range, attachments list.
-- [ ] **B8 Export** — download predictions + report (CSV/PDF).
-
-### Workstream C — Concept & Pitch *(owner: TBD)*
-
-- [ ] **C1** One-slide method explanation (the pipeline picture above, with numbers).
-- [ ] **C2** Why linear: backtest table showing it matches the black box.
-- [ ] **C3** Business framing: analyst hours saved per claim; auditable numbers for insurers.
-- [ ] **C4** Live demo script (upload → auto-detect → result → email in < 2 min).
-- [ ] **C5** Dry run before final presentation.
-
-### Integration contract (A ↔ B)
-
-The GUI only talks to the model through one function, so both sides can work in parallel:
-
-```python
-result = estimate_loss(
-    target: pd.DataFrame,          # target turbine time series
-    references: dict[str, pd.DataFrame],
-    power_curve: pd.DataFrame,     # columns: wind_speed, power
-    outage: tuple[pd.Timestamp, pd.Timestamp],
-)
-
-result.predictions   # DataFrame: timestamp, ws_pred, ws_p10, ws_p90, power_expected
-result.energy_kwh    # dict: p10, p50, p90
-result.metrics       # dict: ws_rmse, ws_mae, p_rmse, p_mae, energy_dev_pct, r2
-result.method        # dict: features used, coefficients, references chosen
-```
-
----
-
-## 7. Suggested repo layout
-
-```
-data/            organiser files (xlsx)
-src/
-  io.py          loading & cleaning           (A1–A2)
-  outage.py      outage detection             (A3)
-  model.py       model + estimate_loss()      (A4, A6–A8)
-  backtest.py    validation harness           (A5)
-  energy.py      power curve & energy         (A7)
-  report.py      insurance email              (B7)
-app.py           Streamlit GUI                (B1–B6, B8)
-notebooks/       exploration
-requirements.txt
-```
-
-## 8. Working agreements
-
-- Branch per task (`a4-baseline`, `b3-outage-panel`, …), small PRs into `main`.
-- Never commit large derived files; keep `data/` to the organiser originals.
-- Any model change must come with backtest numbers vs. the current baseline.
-- Keep the method explainable in one sentence.
-
-## 9. Run locally
+Python 3.10 or newer (we use 3.13). No internet access is needed while the app runs.
 
 ```bash
+git clone https://github.com/AdrianBodrug/BayWe-Challenge.git
+cd BayWe-Challenge
+python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python -m scripts.make_claim_package                                  # demo claim package -> outputs/
-python -m scripts.make_claim_package                                  # email + PDF, all 3 valuations
-python -m scripts.make_claim_package --eeg 73.3 --ppa 70              # operator's own contract prices
-python server.py                                                      # web app -> http://localhost:8000
-python server.py --reload                                             # same, re-imports src/ on every request
+python server.py                                      # open http://localhost:8000
 ```
 
-**Web app (`server.py` + `templates/windgap.html`).** The page runs on our Python model: `server.py` serves it with the backend engine pre-selected and answers `POST /api/analyze` through `src/webapi.py` → `estimate_loss()`. Everything is computed per request: change the target, outage window or reference pool in the page, or upload new files (e.g. `T4_data.xlsx` + `T4_power_curve.xlsx` — they are added to the current dataset), and the references, weights and results update. The page only sends wind speeds; turbines that match `data/` get their direction / temperature / turbulence channels from there. Opened without the server, the page falls back to its built-in browser engine.
+On the start page, choose **Load demo dataset** (the organisers' files in `data/`) or **Upload your own data**.
 
-## 10. Claim deliverables (B7 / B8) — `src/report.py`
+### Using a new dataset (e.g. the jury's test file)
 
-One call produces everything the insurer needs. It only reads the `AssessmentResult` contract (`src/schema.py`), so it keeps working when the model is swapped.
+The organisers' file format works as is: one `<turbine>_data.xlsx` (or `.csv`) per turbine and one `<turbine>_power_curve.xlsx` per target turbine. There are three ways to run on new files:
 
-```python
-from src.assessment import run_assessment   # runs src/model.py estimate_loss() for T1-T3
-from src.report import build_email, build_report_pdf, build_claim_package
-from src.schema import ClaimInfo
+| Way | Command / action | What you get |
+|---|---|---|
+| In the app | Start page → **Upload your own data**, select all files | Outage detected automatically; full analysis, charts, claim |
+| In the app, full model | `python server.py --data path/to/folder`, then upload the same files | As above, plus direction and turbulence corrections (see note) |
+| Command line | `python -m src.backtest --data path/to/folder --out predictions.csv` | Score on the shown week (4–9 Sep), loss per target turbine, 10-min predictions as CSV |
 
-result = run_assessment("data")          # -> AssessmentResult (src/schema.py)
-info = ClaimInfo(wind_farm_name="...", insurer_name="...", policy_number="...",
-                 price_eur_per_mwh=None, waiting_period_h=None)   # user-supplied facts
+Note: the page sends only wind speeds to the model. For turbines that are also in the server's data folder, the server adds their direction, temperature and turbulence channels. Turbines it doesn't know are modelled from wind speeds alone, which is slightly less accurate. The command line always uses every channel.
 
-email = build_email(result, info)        # {"subject", "body", "full"} -> copy-paste box in the GUI
-pkg = build_claim_package(result, info, "outputs")   # .txt + .pdf + .csv + .zip
+Turbines whose name starts with the target park's letter (T) are targets, and every other park is a candidate reference. The outage is the longest run of missing target wind speeds in which the reference data is still available. You can adjust it in the app.
+
+---
+
+## How it works
+
+![Analysis page](docs/img/analysis.png)
+
+One equation per target turbine:
+
+```
+v_target(t) = b0 + w1 · v_H1(t + lag1) + w2 · v_O1(t + lag2) + … + corrections
 ```
 
-| Output | Contents |
+1. **Clean the data.** Rows where every channel is 0 are sensor faults, not calm wind, so they become missing values. Missing values are never read as zero. Short gaps in the reference series (≤ 30 min) are bridged; the target series is never filled.
+2. **Align the references.** Each reference turbine is shifted by the time lag at which it matches the target best (−60 … +60 min) and smoothed over 130 min. A weather front reaches one park before the other, and the smoothing removes local gusts that cannot be transferred between parks.
+3. **Pick the references automatically.** All candidate turbines from other parks are fitted together with weights ≥ 0. A reference with weight 0 adds nothing beyond the others; a turbine is used if its weight is above 0.02. This covers the "automatic turbine selection" bonus.
+4. **Add corrections only if they help.** Wind direction (wake effects), turbulence, time of day and temperature change are tried one at a time. Each is kept only if it lowers the cross-validated error by at least 0.2 %.
+5. **Convert wind into energy.** The predicted wind goes through the power curve, averaged over the model's own error distribution ("expected power"). That matters because the power curve is non-linear. Using the point prediction alone would underestimate the energy by about 125–145 MWh per turbine over the three months of data.
+6. **Attach an honest range.** P10/P90 come from how far the model's energy estimate was off on past 3-day blocks it had not seen.
+
+Why a linear model: in our early experiments a gradient-boosting model was not more accurate in cross-validation (wind RMSE 1.16 vs 1.15 m/s). Wind at the target correlates with the reference parks at only about 0.7. That limit holds for any model. The brief also asks for explainability over accuracy when the two conflict. Here there was no conflict, so we kept the version that anyone can recompute.
+
+---
+
+## How accurate is it
+
+Every 3-day block before and after the outage is left out once, predicted, and compared with the real measurements. That gives 29 blocks of the same length as the hidden outage. The model never sees the block it is scored on.
+
+| Cross-validation (29 × 3 days) | T1 | T2 | T3 |
+|---|---|---|---|
+| Wind speed RMSE | 1.19 m/s | 1.11 m/s | 1.12 m/s |
+| Wind speed MAE | 0.89 m/s | 0.83 m/s | 0.83 m/s |
+| Power RMSE | 672 kW | 640 kW | 629 kW |
+| R² (wind) | 0.69 | 0.76 | 0.71 |
+
+On average, the energy over a 3-day window is within **±9 %** of the measured value.
+
+**Shown test week (4–9 Sep).** We also scored the model on the week the organisers labelled as test data, as if it were an outage:
+
+| | T1 | T2 | T3 | Park |
+|---|---|---|---|---|
+| Measured energy | 213.2 MWh | 312.2 MWh | 271.7 MWh | 797.1 MWh |
+| Estimated energy | 248.0 MWh | 309.9 MWh | 265.7 MWh | 823.7 MWh |
+| Deviation | +16.4 % | −0.7 % | −2.2 % | **+3.3 %** |
+| Wind RMSE | 1.45 m/s | 1.17 m/s | 1.29 m/s | |
+| Measured value inside P10–P90? | yes | yes | yes | |
+
+The app shows the same metrics for any window you choose. If the window contains real measurements, it is treated as a backtest and scored against them.
+
+---
+
+## The app
+
+| Page | What it shows |
 |---|---|
-| Email draft (`templates/claim_email.txt.j2`) | What happened, lost MWh (P50 + P10–P90, per turbine), optional EUR value and waiting-period figure, 2-line method + accuracy, metering-data caveat, attachments list |
-| PDF report (4 pages) | 1 Summary & outage details · 2 Wind + energy charts · 3 Method, accuracy table, validation scatter, limitations · A Audit trail: model version, regression weights, SHA-256 of every input file |
-| CSV | 10-min reconstructed wind (P10/P50/P90), expected power, energy per turbine |
+| **Start** | Load the demo dataset or upload your own files |
+| **Analysis** | Detected outage (adjustable); target turbine or the whole park; reference pool (automatic or manual). Tabs: **Wind speed** (forecast vs. reference and measurements), **Power & loss** (power with P10–P90 band, cumulative lost MWh), **Accuracy** (metrics above, per turbine), **References & model** (weights, lags, stability, the fitted equation including the intercept) |
+| **Method** | The method on one page, with the live equation of the current analysis |
+| **Insurance** | Claim form, email draft, PDF report preview (see below) |
 
-Design rules: missing facts render as visible `[placeholders]` — the tool never invents policy numbers, prices or deductibles; the email is a draft for human review, never sent automatically. See `docs/sample_claim/` for example output.
+German and English, switchable in the header.
 
-## 11. Valuation with day-ahead prices — `src/pricing.py`
+![References and model](docs/img/references.png)
 
-Lost energy is valued **interval by interval** with German day-ahead prices (DE-LU) from one file in the repo: `data/prices/day_ahead_DE-LU.csv` (`timestamp_utc, eur_per_mwh`, Jan 2024 → 25 Oct 2026; hourly until Sep 2025, quarter-hourly since). The app never goes online for prices. Refresh the file with `python -m scripts.update_prices` (source: Energy-Charts / Bundesnetzagentur | SMARD.de, CC BY 4.0).
+### Where each requirement is covered
 
-All three remuneration models are always calculated and shown side by side (PDF section 4, email comparison line); `--valuation` / the form picks the headline one.
+| From the brief | Where |
+|---|---|
+| Accuracy metrics | Analysis → Accuracy; Method page; PDF report (method and accuracy) |
+| Predicted wind speed time series | Analysis → Wind speed |
+| Explanation of the method and its uncertainty | Method page; Analysis → References & model; PDF report |
+| Energy loss in kWh and its visualisation | Analysis KPI and Power & loss tab (MWh, with P10–P90) |
+| Inputs: time series, power curves, outage period | Upload on the start page; outage detected automatically and adjustable |
+| Bonus: insurance report | Insurance tab: email draft + PDF |
+| Bonus: additional parameters | Direction, turbulence, time of day and temperature change, kept only when they reduce the error |
+| Bonus: automatic turbine selection | Weights ≥ 0 fit with stability check; manual pool optional |
+
+---
+
+## Insurance claim
+
+![Insurance tab](docs/img/insurance.png)
+
+The Insurance tab turns the analysis into a draft notification for the insurer. These values come from the data, so nobody types them in:
+
+- the outage window and its duration
+- the affected turbines (every turbine of the park that is offline in that window)
+- their rated power
+- the lost energy
+
+The form asks only for what no data file contains: the wind-farm, operator and insurer details, and optionally the operator's own contract prices. **Create claim** returns:
+
+- **Email draft**: what happened, lost energy for the wind farm (P50 and range), its value under all three remuneration models, the method and its accuracy in two sentences, and a note that grid-operator metering data will follow. You can copy it or open it in your mail app. Nothing is sent automatically.
+- **PDF report**, previewed in the page before download:
+  - summary;
+  - reconstructed wind and energy charts;
+  - valuation;
+  - method and accuracy, with a validation chart;
+  - an appendix with the regression weights, a per-turbine breakdown and SHA-256 fingerprints of every input file, so the numbers can be audited.
+
+Missing facts appear as visible `[placeholders]`. The tool never invents a policy number or a price. A sample is in [`docs/sample_claim/`](docs/sample_claim/).
+
+### What the lost energy is worth
+
+Each 10- or 15-minute interval is valued at its own price. Prices come from one file in the repo, `data/prices/day_ahead_DE-LU.csv` (German day-ahead market, Jan 2024 – Oct 2026; source: Energy-Charts / SMARD, CC BY 4.0). The app never goes online for prices.
 
 | Model | Value per lost MWh | Default if the operator gives no price |
 |---|---|---|
-| `market` | day-ahead price of that interval (negative → 0, plant would curtail) | – |
-| `eeg` | day-ahead price + max(0, reference value − monthly market value of onshore wind); 0 in negative-price intervals (§51 EEG) | 73.30 EUR/MWh – typical for plants now running (2024 tenders, ~7.33 ct/kWh) |
-| `ppa` | fixed pay-as-produced price | 73.13 EUR/MWh – German onshore wind PPA benchmark (Veyt) |
+| Day-ahead market | Day-ahead price of that interval (negative prices count as 0: the plant would have curtailed) | – |
+| EEG market premium | Day-ahead price + max(0, EEG reference value − monthly market value of onshore wind); nothing in negative-price hours (§51 EEG) | Reference value 73.30 €/MWh (average award, 2024 onshore tenders) |
+| PPA | Fixed price | 73.13 €/MWh (German onshore wind PPA benchmark, Veyt) |
 
-- Monthly market value of onshore wind: official values (netztransparenz.de) in `OFFICIAL_WIND_MARKET_VALUE` – Aug 2026 115.45, Sep 2026 109.40 EUR/MWh; other months use the value of the lost energy as a labelled proxy.
-- Intervals after the end of the CSV are valued provisionally (last day repeated) and flagged in email + PDF.
-- Everything is matched in UTC, so the extra hour when summer time ends is counted correctly.
+For the hidden window, the September 2026 market value of onshore wind (109.40 €/MWh) is above the reference value. The EEG premium is therefore 0 and the EEG value equals the market value (€41,539). The PPA value is €22,745.
 
-## 12. Insurance tab (`/api/claim`)
+---
 
-`python server.py` → tab **Versicherung**. The outage window, its duration, the affected turbines (every turbine of the park that is out in the window) and their rated power come from the analysis and the data – nothing to type in. The form only asks for what no data file contains: wind farm / operator / insurer details and, optionally, the EEG reference value and PPA price (empty = market benchmarks). **Meldung erstellen** reruns the model for the whole park and returns the email draft (copy / open in mail app) and the PDF report. Email and PDF always show the **wind-farm total** and **all three remuneration models** (day-ahead, EEG market premium, PPA); the per-turbine breakdown is only in the PDF appendix. Editing the form and regenerating reuses the model run (~2 s). Nothing is sent automatically.
+## Repository map
+
+```
+server.py                 local web server: serves the app, /api/analyze, /api/claim
+templates/
+  windgap.html            the app (single self-contained page, fonts embedded)
+  claim_email.txt.j2      email template
+src/
+  data_io.py              load xlsx/csv, align to 10 min, clean sensor faults
+  outage.py               detect outages from missing target data
+  model.py                estimate_loss(): reference selection, lags, corrections, CV, P10/P90
+  energy.py               power curve, expected power, kWh
+  backtest.py             CLI: shown-week score + hidden-window predictions
+  webapi.py               /api/analyze: page request -> estimate_loss()
+  assessment.py           runs the model for every affected turbine -> AssessmentResult
+  claimapi.py             /api/claim: model run + email + PDF, kept in memory only
+  report.py               email draft and PDF report
+  pricing.py              day-ahead / EEG / PPA valuation
+  schema.py               data contracts between model, report and app
+scripts/
+  make_claim_package.py   email + PDF from the command line
+  update_prices.py        refresh the price CSV (needs internet)
+data/                     organiser files (+ prices/)
+docs/                     sample claim, screenshots
+notebooks/                data exploration
+examples/                 minimal Streamlit example of the estimate_loss() interface
+```
+
+Other commands:
+
+```bash
+python server.py --reload                         # re-imports src/ on every request (development)
+python -m scripts.make_claim_package              # email + PDF for the demo data -> outputs/
+python -m src.backtest --no-extras                # references-only model, for comparison
+```
+
+---
+
+## Data notes
+
+The organisers' data covers 10 turbines in 3 parks: T1–T3 are the targets, H1–H5 and O1–O2 are the references. It spans 1 Jul – 30 Sep 2026 in 10-minute steps, with Berlin time stamps.
+
+- In the hidden window, all three T turbines are blank at the same time. A T turbine therefore can never serve as a reference for another T turbine; only the H and O parks are used.
+- The outage lies in the middle of the data, so the model learns from both sides of it.
+- The O park has no turbulence channel, and its air pressure is a constant (990.27). Features that need these are tested only where the data exists.
+- On 3–4 Aug, rows are missing from every file, references included. The app hides gaps like this, because there is nothing to reconstruct them from.
+- Prices are matched in UTC, so the extra hour when summer time ends is counted correctly.
+
+## Limitations
+
+- The method assumes that the relationship between the parks during the outage is the same as in the rest of the data. Unusual weather (e.g. a storm front with an unusual track) can break that, and the P10–P90 range only reflects errors seen in the past.
+- The estimate is the energy the turbines *could* have produced. Whether they actually stopped has to be confirmed with the grid operator's metering data, and the email says so.
+- The power curve is the manufacturer curve. Availability, curtailment and icing are not modelled.
+
+## Team
+
+- **Adrian Bodrug** ([AdrianBodrug](https://github.com/AdrianBodrug)): app design, insurance claim (email, PDF, valuation)
+- **Pengxuan (Peter) Huang** ([pengxuanHuang](https://github.com/pengxuanHuang)): model and backend
+- [weinbrennerm1-code](https://github.com/weinbrennerm1-code): WindGap frontend
