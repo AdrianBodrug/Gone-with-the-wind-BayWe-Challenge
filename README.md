@@ -199,8 +199,7 @@ src/
 scripts/
   make_claim_package.py   email + PDF from the command line
   update_prices.py        refresh the price CSV (needs internet)
-  deploy_hf.py            publish the app to the Hugging Face Space
-Dockerfile                container for the app (used by the Space)
+Dockerfile                container for the app (docker build / docker run, see below)
 requirements-app.txt      packages the app needs (requirements.txt also has notebook extras)
 data/                     organiser files (+ prices/)
 docs/                     sample claim, screenshots
@@ -216,8 +215,6 @@ python -m scripts.make_claim_package              # email + PDF for the demo dat
 python -m src.backtest --no-extras                # references-only model, for comparison
 docker build -t windgap . && docker run -p 7860:7860 windgap   # same app in a container -> http://localhost:7860
 ```
-
-**Hosting.** Every push to `main` publishes the app to a Hugging Face Space (Docker) through `.github/workflows/deploy-hf.yml` and `scripts/deploy_hf.py`. The workflow needs the repository secret `HF_TOKEN`, a Hugging Face token with write access.
 
 ---
 
