@@ -23,24 +23,24 @@ Everything runs locally in the browser.
 
 | Turbine | Lost energy, P50 | Likely range (P10–P90) | Reference turbines the tool chose |
 |---|---|---|---|
-| T1 | 89.8 MWh | 77.6 – 101.9 MWh | H1, H2, O1 |
-| T2 | 122.2 MWh | 111.0 – 142.9 MWh | H2, H3, H4, H5, O1, O2 |
-| T3 | 99.1 MWh | 84.1 – 110.7 MWh | H2, H4, H5, O1 |
-| **Park T** | **311.0 MWh** | **272.7 – 355.5 MWh** | |
+| T1 | 86.5 MWh | 70.6 – 102.2 MWh | H2, H1 |
+| T2 | 124.1 MWh | 106.0 – 137.0 MWh | O2, H5, H2 |
+| T3 | 101.4 MWh | 84.2 – 112.2 MWh | O2, H2 |
+| **Park T** | **312.0 MWh** | **260.8 – 351.3 MWh** | |
 
-At the day-ahead prices of those hours, the lost energy is worth about **€41,500**.
+At the day-ahead prices of those hours, the lost energy is worth about **€41,900**.
 
-The 10-minute predictions (wind P10/P50/P90 and expected power per turbine) are written by `python -m src.backtest` (see [Run it](#run-it)).
+The 10-minute predictions are in [`CSV_output/`](CSV_output/): one file per turbine and one for the park total, with wind speed and power (P10/P50/P90) and the cumulative lost energy, plus a metrics summary. The app's **Export CSV** button and `python -m src.backtest` produce the same predictions for any dataset.
 
 ---
 
 ## Run it
 
-Python 3.10 or newer (we use 3.13). No internet access is needed while the app runs.
+Python 3.11 or newer (we use 3.13). No internet access is needed while the app runs.
 
 ```bash
-git clone https://github.com/AdrianBodrug/BayWe-Challenge.git
-cd BayWe-Challenge
+git clone https://github.com/AdrianBodrug/Gone-with-the-wind-BayWe-Challenge.git
+cd Gone-with-the-wind-BayWe-Challenge
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 python server.py                                      # open http://localhost:8000
@@ -56,7 +56,7 @@ The organisers' file format works as is: one `<turbine>_data.xlsx` (or `.csv`) p
 |---|---|---|
 | In the app | Start page → **Upload your own data**, select all files | Outage detected automatically; full analysis, charts, claim |
 | In the app, full model | `python server.py --data path/to/folder`, then upload the same files | As above, plus direction and turbulence corrections (see note) |
-| Command line | `python -m src.backtest --data path/to/folder --out predictions.csv` | Score on the shown week (4–9 Sep), loss per target turbine, 10-min predictions as CSV |
+| Command line | `python -m src.backtest --data path/to/folder --out predictions.csv` | Held-out score on the shown week (4–9 Sep), loss per target turbine, 10-min predictions as CSV |
 
 Note: the page sends only wind speeds to the model. For turbines that are also in the server's data folder, the server adds their direction, temperature and turbulence channels. Turbines it doesn't know are modelled from wind speeds alone, which is slightly less accurate. The command line always uses every channel.
 
@@ -78,8 +78,8 @@ v_target(t) = b0 + w1 · v_H1(t + lag1) + w2 · v_O1(t + lag2) + … + correctio
 2. **Align the references.** Each reference turbine is shifted by the time lag at which it matches the target best: the highest correlation of the 10-min values, searched from −60 to +60 min, without the test week and the outage. The lag is the time of the reference reading relative to the target time. **+30 min** means the target at 12:00 is matched with the reference reading from 12:30: the wind reaches the target first and the reference 30 min later. **−30 min** means the reading from 11:30. The references are then smoothed with a centred moving average over 30, 70 or 130 min, whichever fits the test week best for that turbine. A reference far away cannot see the target's local gusts, and its own gusts are noise for the target. Smoothing removes them, and it keeps the model robust to a lag that is off by 10–20 min.
 3. **Pick the references automatically.** Forward selection on the shown test week (4–9 Sep), with the model fitted without that week. The model starts with the single reference that predicts the week best, then keeps adding the reference that lowers the error most. It stops when the next one gains less than 0.5 %. The score is the mean of wind RMSE, wind MAE, power RMSE and power MAE relative to a model with all references. Weights are ≥ 0. Only references measured during the outage (≥ 90 % of its steps) are candidates. This covers the "automatic turbine selection" bonus.
 4. **Add corrections only if they help.** Direction curve (wake), wind direction, turbulence, time of day, temperature change and weather terms (temperature, air pressure, air density, turbulence intensity) are tried the same way. Each is kept only if it lowers the test-week score by at least 0.5 %. The final model is then refitted on all data outside the outage.
-5. **Convert wind into energy.** The predicted wind goes through the power curve, averaged over the model's own error distribution ("expected power"). That matters because the power curve is non-linear. Using the point prediction alone would underestimate the energy by about 125–145 MWh per turbine over the three months of data.
-6. **Attach an honest range.** P10/P90 come from how far the model's energy estimate was off on past 3-day blocks it had not seen.
+5. **Convert wind into energy.** The predicted wind goes through the power curve, averaged over the model's own error distribution ("expected power"). The power curve is non-linear (flat below cut-in and at rated power), so pushing only the single most likely wind speed through it would bias the energy total.
+6. **Attach an honest range.** P10/P90 come from how far the model's energy estimate was off on past 3-day blocks it had not been fitted on.
 
 ### Missing data
 
@@ -102,26 +102,32 @@ Why a linear model: in our early experiments a gradient-boosting model was not m
 
 ## How accurate is it
 
-Every 3-day block before and after the outage is left out once, predicted, and compared with the real measurements. That gives 29 blocks of the same length as the hidden outage. The model never sees the block it is scored on.
+We measure accuracy in two ways, because they answer different questions.
 
-| Cross-validation (29 × 3 days) | T1 | T2 | T3 |
-|---|---|---|---|
-| Wind speed RMSE | 1.19 m/s | 1.11 m/s | 1.12 m/s |
-| Wind speed MAE | 0.89 m/s | 0.83 m/s | 0.83 m/s |
-| Power RMSE | 672 kW | 640 kW | 629 kW |
-| R² (wind) | 0.69 | 0.76 | 0.71 |
-
-On average, the energy over a 3-day window is within **±9 %** of the measured value.
-
-**Shown test week (4–9 Sep).** We also scored the model on the week the organisers labelled as test data, as if it were an outage:
+**1. Fully held-out test: the shown test week (4–9 Sep).** We blank the target turbines' wind for that week, as if it were an outage, and run the complete tool on it. The settings are chosen on the 6 days after it (10–15 Sep), the model is fitted without the week, and its estimate is compared with the real measurements. The model sees nothing of this week, so this is the closest to how it will do on new data. Reproduce it with `python -m src.backtest`.
 
 | | T1 | T2 | T3 | Park |
 |---|---|---|---|---|
 | Measured energy | 213.2 MWh | 312.2 MWh | 271.7 MWh | 797.1 MWh |
-| Estimated energy | 248.0 MWh | 309.9 MWh | 265.7 MWh | 823.7 MWh |
-| Deviation | +16.4 % | −0.7 % | −2.2 % | **+3.3 %** |
-| Wind RMSE | 1.45 m/s | 1.17 m/s | 1.29 m/s | |
-| Measured value inside P10–P90? | yes | yes | yes | |
+| Estimated energy | 260.6 MWh | 309.0 MWh | 266.1 MWh | 835.7 MWh |
+| Deviation | +22.3 % | −1.0 % | −2.1 % | **+4.8 %** |
+| Wind speed RMSE | 1.55 m/s | 1.20 m/s | 1.29 m/s | |
+| Wind speed MAE | 1.19 m/s | 0.90 m/s | 0.98 m/s | |
+| Power RMSE | 940 kW | 744 kW | 810 kW | |
+| Measured value inside P10–P90? | no | yes | yes | |
+
+T1 is the hardest turbine to reconstruct: for this week its estimate was 22 % too high and outside its range. T2 and T3 are within ±2 %.
+
+**2. Selection week, as shown in the app.** For the hidden outage, the settings are chosen on the shown test week itself, with the model fitted without that week. The Accuracy tab, the PDF report and `CSV_output/metrics_summary_shown_test_week.csv` show the scores on that week:
+
+| | T1 | T2 | T3 | Park |
+|---|---|---|---|---|
+| Wind speed RMSE | 1.38 m/s | 1.15 m/s | 1.29 m/s | 1.28 m/s |
+| Energy deviation | +4.6 % | +0.7 % | −2.3 % | +0.7 % |
+
+Because the settings were picked to do well on this week, these scores are somewhat better than what to expect on unseen data. Table 1 is the stricter test.
+
+**3. Range.** Over 29 past 3-day blocks the model had not been fitted on, its energy estimate was off by ±11 % on average. The P10–P90 range comes from the spread of these errors.
 
 The app shows the same metrics for any window you choose. If the window contains real measurements, it is treated as a backtest and scored against them.
 
@@ -132,7 +138,7 @@ The app shows the same metrics for any window you choose. If the window contains
 | Page | What it shows |
 |---|---|
 | **Start** | Load the demo dataset or upload your own files |
-| **Analysis** | Detected outage (adjustable); target turbine or the whole park; reference pool (automatic or manual). Tabs: **Wind speed** (forecast vs. reference and measurements), **Power & loss** (power with P10–P90 band, cumulative lost MWh), **Accuracy** (metrics above, per turbine), **References & model** (weights, lags, stability, the fitted equation including the intercept) |
+| **Analysis** | Detected outage (adjustable); target turbine or the whole park; reference pool (automatic or manual). Tabs: **Wind speed** (forecast vs. reference and measurements), **Power & loss** (power with P10–P90 band, cumulative lost MWh), **Accuracy** (metrics per turbine), **References & model** (the selection path step by step, weights, lags, intercept and the fitted equation). **Export CSV** downloads the 10-min predictions and metrics |
 | **Method** | The method on one page, with the live equation of the current analysis |
 | **Insurance** | Claim form, email draft, PDF report preview (see below) |
 
@@ -150,8 +156,9 @@ German and English, switchable in the header.
 | Energy loss in kWh and its visualisation | Analysis KPI and Power & loss tab (MWh, with P10–P90) |
 | Inputs: time series, power curves, outage period | Upload on the start page; outage detected automatically and adjustable |
 | Bonus: insurance report | Insurance tab: email draft + PDF |
-| Bonus: additional parameters | Direction, turbulence, time of day and temperature change, kept only when they reduce the error |
-| Bonus: automatic turbine selection | Weights ≥ 0 fit with stability check; manual pool optional |
+| Predictions for the hidden test period | `CSV_output/`; Export CSV button; `python -m src.backtest` |
+| Bonus: additional parameters | Wind direction (wake), turbulence, time of day, temperature, air pressure and air density, each kept only when it lowers the error |
+| Bonus: automatic turbine selection | Forward selection of the references, shown step by step in the app; manual pool optional |
 
 ---
 
@@ -188,23 +195,24 @@ Each 10- or 15-minute interval is valued at its own price. Prices come from one 
 | EEG market premium | Day-ahead price + max(0, EEG reference value − monthly market value of onshore wind); nothing in negative-price hours (§51 EEG) | Reference value 73.30 €/MWh (average award, 2024 onshore tenders) |
 | PPA | Fixed price | 73.13 €/MWh (German onshore wind PPA benchmark, Veyt) |
 
-For the hidden window, the September 2026 market value of onshore wind (109.40 €/MWh) is above the reference value. The EEG premium is therefore 0 and the EEG value equals the market value (€41,539). The PPA value is €22,745.
+For the hidden window, the September 2026 market value of onshore wind (109.40 €/MWh) is above the reference value. The EEG premium is therefore 0 and the EEG value equals the market value (€41,938). The PPA value is €22,814.
 
 ---
 
 ## Repository map
 
 ```
-server.py                 local web server: serves the app, /api/analyze, /api/claim
+server.py                 local web server: serves the app, /api/analyze, /api/export, /api/claim
 templates/
   windgap.html            the app (single self-contained page, fonts embedded)
   claim_email.txt.j2      email template
 src/
   data_io.py              load xlsx/csv, align to 10 min, clean sensor faults
   outage.py               detect outages from missing target data
-  model.py                estimate_loss(): reference selection, lags, corrections, CV, P10/P90
+  model.py                estimate_loss(): lags, smoothing, forward selection, fallback, P10/P90
   energy.py               power curve, expected power, kWh
-  backtest.py             CLI: shown-week score + hidden-window predictions
+  backtest.py             CLI: held-out shown-week score + hidden-window predictions
+  export.py               CSV export (per turbine, park total, metrics summary)
   webapi.py               /api/analyze: page request -> estimate_loss()
   assessment.py           runs the model for every affected turbine -> AssessmentResult
   claimapi.py             /api/claim: model run + email + PDF, kept in memory only
@@ -217,6 +225,7 @@ scripts/
 Dockerfile                container for the app (docker build / docker run, see below)
 requirements-app.txt      packages the app needs (requirements.txt also has notebook extras)
 data/                     organiser files (+ prices/)
+CSV_output/               predictions for the hidden test period
 docs/                     sample claim, screenshots
 notebooks/                data exploration
 examples/                 minimal Streamlit example of the estimate_loss() interface
