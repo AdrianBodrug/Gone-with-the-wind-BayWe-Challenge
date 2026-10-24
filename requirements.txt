@@ -5,7 +5,7 @@ scipy>=1.10
 openpyxl>=3.1
 
 # GUI (app.py)
-streamlit>=1.30
+streamlit>=1.50
 plotly>=5.18
 
 # Notebook (notebooks/)
