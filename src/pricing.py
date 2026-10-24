@@ -16,6 +16,7 @@ valued *provisionally* by repeating the last published day's price profile, and 
 from __future__ import annotations
 
 import json
+import ssl
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -31,6 +32,7 @@ from .schema import AssessmentResult
 API_URL = "https://api.energy-charts.info/price"
 BIDDING_ZONE = "DE-LU"
 LOCAL_TZ = "Europe/Berlin"
+LAST_FETCH_ERROR: Optional[str] = None   # why the last live download failed (shown in reports)
 CACHE_DIR = Path(__file__).resolve().parents[1] / "data" / "prices"
 ATTRIBUTION = ("Day-ahead prices: Bundesnetzagentur | SMARD.de, via Energy-Charts API "
                "(Fraunhofer ISE), licence CC BY 4.0")
@@ -63,13 +65,23 @@ def _parse(payload: dict) -> pd.Series:
     return s[~s.index.duplicated()].sort_index()
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """Use certifi's CA bundle when available - python.org builds on macOS ship without
+    system certificates ('CERTIFICATE_VERIFY_FAILED')."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
 def _download(start_utc: pd.Timestamp, end_utc: pd.Timestamp, bzn: str, timeout: float) -> dict:
     # request whole local days with one day of margin; the API takes local dates
     d0 = (start_utc.tz_convert(LOCAL_TZ) - pd.Timedelta("1D")).strftime("%Y-%m-%d")
     d1 = (end_utc.tz_convert(LOCAL_TZ) + pd.Timedelta("1D")).strftime("%Y-%m-%d")
     url = f"{API_URL}?{urllib.parse.urlencode({'bzn': bzn, 'start': d0, 'end': d1})}"
     req = urllib.request.Request(url, headers={"User-Agent": "baywa-outage-loss-tool/0.1"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as r:
         payload = json.loads(r.read().decode())
     payload["_request"] = {"url": url, "fetched_utc": pd.Timestamp.now(tz="UTC").isoformat()}
     return payload
@@ -94,6 +106,7 @@ def fetch_day_ahead(start_utc, end_utc, bzn: str = BIDDING_ZONE, timeout: float 
 
     Returns (prices, source) with source 'live' or 'cache'. Live results are cached.
     """
+    global LAST_FETCH_ERROR
     start_utc, end_utc = pd.Timestamp(start_utc), pd.Timestamp(end_utc)
     if not offline:
         try:
@@ -103,9 +116,12 @@ def fetch_day_ahead(start_utc, end_utc, bzn: str = BIDDING_ZONE, timeout: float 
                 CACHE_DIR.mkdir(parents=True, exist_ok=True)
                 name = f"{bzn}_{s.index[0]:%Y%m%dT%H%M}_{s.index[-1]:%Y%m%dT%H%M}.json"
                 (CACHE_DIR / name).write_text(json.dumps(payload))
+            LAST_FETCH_ERROR = None
             return s, "live"
-        except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError):
-            pass
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError) as e:
+            LAST_FETCH_ERROR = f"{type(e).__name__}: {getattr(e, 'reason', e)}"
+            import warnings
+            warnings.warn(f"Live day-ahead price download failed ({LAST_FETCH_ERROR}); using local cache.")
     return _load_cache(bzn), "cache"
 
 

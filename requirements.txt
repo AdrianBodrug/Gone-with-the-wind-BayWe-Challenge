@@ -11,6 +11,7 @@ plotly>=5.18
 # Claim report & email (src/report.py)
 jinja2>=3.1
 fpdf2>=2.7
+certifi            # HTTPS certificates for the live price download (macOS python.org builds)
 matplotlib>=3.7
 
 # Notebook (notebooks/)
