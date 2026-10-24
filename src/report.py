@@ -176,7 +176,7 @@ def export_timeseries(result: AssessmentResult) -> pd.DataFrame:
     return out.rename(columns={
         "ws_pred": "wind_speed_pred_ms", "ws_p10": "wind_speed_p10_ms", "ws_p90": "wind_speed_p90_ms",
         "power_kw": "expected_power_kw", "power_p10_kw": "power_at_ws_p10_kw",
-        "power_p90_kw": "power_at_ws_p90_kw"}).round(4)
+        "power_p90_kw": "power_at_ws_p90_kw"}).round({c: 4 for c in out.columns if out[c].dtype.kind == "f"})
 
 
 # ================================================================ charts
@@ -646,7 +646,7 @@ def build_claim_package(result: AssessmentResult, info: ClaimInfo, out_dir: str 
         for k, x in avail.items():
             base[f"value_eur_{k}"] = x.series["value_eur"].to_numpy()
         files["valuation"] = out / f"{stem}_valuation.csv"
-        base.round(4).to_csv(files["valuation"], index=False)
+        base.round({c: 4 for c in base.columns if base[c].dtype.kind == "f"}).to_csv(files["valuation"], index=False)
         parts.append("valuation")
     files["zip"] = out / f"{stem}_package.zip"
     with zipfile.ZipFile(files["zip"], "w", zipfile.ZIP_DEFLATED) as z:
