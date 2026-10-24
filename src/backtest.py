@@ -93,7 +93,9 @@ def main():
               f"lost {r.energy_kwh['p50'] / 1000:.1f} MWh "
               f"(P10 {r.energy_kwh['p10'] / 1000:.1f} - P90 {r.energy_kwh['p90'] / 1000:.1f})")
         print(f"    {r.method['description']}")
-        print("    CV: " + ", ".join(f"{k}={v:.3f}" for k, v in r.metrics.items() if k != "n_eval"))
+        m = r.metrics
+        print(f"    {m['basis']} {m['basis_period']}: "
+              + ", ".join(f"{k}={v:.3f}" for k, v in m.items() if isinstance(v, float)))
         out.append(p.assign(turbine=t))
     total = sum(r.energy_kwh["p50"] for r in results.values())
     print(f"Total lost: {total / 1000:.1f} MWh")
