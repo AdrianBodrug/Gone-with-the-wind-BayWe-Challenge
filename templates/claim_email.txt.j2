@@ -13,13 +13,17 @@ Affected turbines: {{ turbine_list }}{% if turbine_model %} ({{ turbine_model }}
 ESTIMATED ENERGY YIELD LOSS
 Because the turbines' own wind measurements are unavailable for this period, we reconstructed the wind conditions from reference wind farms nearby and applied the turbines' power curves.
 
-  Estimated lost energy (best estimate, P50):  {{ e_p50 }} MWh
-  Likely range (P10 – P90):                    {{ e_p10 }} – {{ e_p90 }} MWh
-{% for t in turbines %}    {{ t.name }}: {{ t.p50 }} MWh (range {{ t.p10 }} – {{ t.p90 }} MWh)
-{% endfor %}{% if waiting_period_h is not none %}
+  Estimated lost energy, wind farm total (P50):  {{ e_p50 }} MWh
+  Likely range (P10 – P90):                       {{ e_p10 }} – {{ e_p90 }} MWh
+{% if waiting_period_h is not none %}
 Energy lost beyond the {{ waiting_period_h }}-hour waiting period: {{ e_after_wp }} MWh (P50).
 {% endif %}
-{% if valuation_text %}{{ valuation_text }}
+VALUE OF THE LOST ENERGY
+{% if valuation_lines %}Depending on how the wind farm's electricity is remunerated, the lost revenue is approximately:
+
+{% for l in valuation_lines %}  {{ l.padded }}EUR {{ l.p50 }}  (range EUR {{ l.p10 }} – {{ l.p90 }})
+{% endfor %}{% for n in valuation_notes %}
+- {{ n }}{% endfor %}
 {% else %}[Valuation: {{ valuation_missing }}]
 {% endif %}
 METHOD AND ACCURACY
@@ -29,9 +33,8 @@ On historical periods where actual measurements are known, the method reconstruc
 PLEASE NOTE
 This is an estimate based on reference data. Since the outage concerned the communication connection, we will provide the grid operator's metering data for the period to confirm that no energy was fed into the grid. We will update this notification if the final figures differ.
 
-ATTACHMENTS
-  1. {{ report_filename }} – energy loss assessment report
-  2. {{ data_filename }} – reconstructed 10-minute time series for the outage period
+ATTACHMENT
+  {{ report_filename }} – energy loss assessment report (method, accuracy, valuation, audit trail)
 
 Please let us know if you need further information or would like to arrange a call.
 

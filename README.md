@@ -187,8 +187,8 @@ requirements.txt
 ```bash
 pip install -r requirements.txt
 python -m scripts.make_claim_package                                  # demo claim package -> outputs/
-python -m scripts.make_claim_package --waiting-hours 24                      # all 3 valuations, market as headline
-python -m scripts.make_claim_package --valuation eeg --eeg 73.3 --ppa 70     # operator's own contract prices
+python -m scripts.make_claim_package                                  # email + PDF, all 3 valuations
+python -m scripts.make_claim_package --eeg 73.3 --ppa 70              # operator's own contract prices
 python server.py                                                      # web app -> http://localhost:8000
 python server.py --reload                                             # same, re-imports src/ on every request
 ```
@@ -220,21 +220,22 @@ pkg = build_claim_package(result, info, "outputs")   # .txt + .pdf + .csv + .zip
 
 Design rules: missing facts render as visible `[placeholders]` — the tool never invents policy numbers, prices or deductibles; the email is a draft for human review, never sent automatically. See `docs/sample_claim/` for example output.
 
-## 11. Valuation with live day-ahead prices — `src/pricing.py`
+## 11. Valuation with day-ahead prices — `src/pricing.py`
 
-The lost energy is valued **interval by interval** at the German day-ahead price (DE-LU), downloaded live for exactly the outage window from the free Energy-Charts API (Fraunhofer ISE; data Bundesnetzagentur | SMARD.de, CC BY 4.0). No API key, works for any date including outages that are still ongoing.
+Lost energy is valued **interval by interval** with German day-ahead prices (DE-LU) from one file in the repo: `data/prices/day_ahead_DE-LU.csv` (`timestamp_utc, eur_per_mwh`, Jan 2024 → 25 Oct 2026; hourly until Sep 2025, quarter-hourly since). The app never goes online for prices. Refresh the file with `python -m scripts.update_prices` (source: Energy-Charts / Bundesnetzagentur | SMARD.de, CC BY 4.0).
 
-All three remuneration models are always calculated and shown side by side (PDF section 4, email comparison line); `--valuation` picks the headline one.
+All three remuneration models are always calculated and shown side by side (PDF section 4, email comparison line); `--valuation` / the form picks the headline one.
 
 | Model | Value per lost MWh | Default if the operator gives no price |
 |---|---|---|
 | `market` | day-ahead price of that interval (negative → 0, plant would curtail) | – |
-| `eeg` | day-ahead price + max(0, reference value − monthly market value of onshore wind); 0 in negative-price intervals (§51 EEG) | 73.30 EUR/MWh – typical for plants now running (2024 tenders, ~7.33 ct/kWh); new 2026 awards are ~4.8 ct/kWh |
+| `eeg` | day-ahead price + max(0, reference value − monthly market value of onshore wind); 0 in negative-price intervals (§51 EEG) | 73.30 EUR/MWh – typical for plants now running (2024 tenders, ~7.33 ct/kWh) |
 | `ppa` | fixed pay-as-produced price | 73.13 EUR/MWh – German onshore wind PPA benchmark (Veyt) |
 
-Monthly market value of onshore wind: official values (netztransparenz.de) where known – Aug 2026 115.45, Sep 2026 109.40 EUR/MWh – otherwise estimated live from Energy-Charts generation × price. While the market value is above the reference value (as in all of 2026 so far) the EEG premium is zero and EEG = market valuation.
+- Monthly market value of onshore wind: official values (netztransparenz.de) in `OFFICIAL_WIND_MARKET_VALUE` – Aug 2026 115.45, Sep 2026 109.40 EUR/MWh; other months use the value of the lost energy as a labelled proxy.
+- Intervals after the end of the CSV are valued provisionally (last day repeated) and flagged in email + PDF.
+- Everything is matched in UTC, so the extra hour when summer time ends is counted correctly.
 
-- **Not-yet-published hours** (prices for day D appear ~13:00 on D-1): valued provisionally by repeating the last published day's profile, flagged in email + PDF, and updated on re-run.
-- **Time zones**: everything is matched in UTC, so the extra hour when summer time ends (e.g. 25 Oct 2026) is counted correctly; hourly prices (before Oct 2025) and quarter-hourly prices (since) both work.
-- **Offline**: every download is cached in `data/prices/`; the hidden-window prices are committed so the demo works without internet.
-- Output: valuation paragraph in the email, section 4 + price chart in the PDF, `*_valuation.csv` with price and EUR per 10-min interval.
+## 12. Insurance tab (`/api/claim`)
+
+`python server.py` → tab **Versicherung**. The outage window, its duration, the affected turbines (every turbine of the park that is out in the window) and their rated power come from the analysis and the data – nothing to type in. The form only asks for what no data file contains: wind farm / operator / insurer details and, optionally, the EEG reference value and PPA price (empty = market benchmarks). **Meldung erstellen** reruns the model for the whole park and returns the email draft (copy / open in mail app) and the PDF report. Email and PDF always show the **wind-farm total** and **all three remuneration models** (day-ahead, EEG market premium, PPA); the per-turbine breakdown is only in the PDF appendix. Editing the form and regenerating reuses the model run (~2 s). Nothing is sent automatically.

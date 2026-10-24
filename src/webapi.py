@@ -47,6 +47,7 @@ class Store:
     """Full turbine files and power curves from the server's data folder."""
 
     def __init__(self, data_dir="data"):
+        self.data_dir = str(data_dir)
         self.turbines, self.curves = load_folder(str(data_dir))
 
 

@@ -1,7 +1,7 @@
-"""Generate the claim package (email draft, PDF report, CSV) from the data folder.
+"""Generate the claim package (email draft + PDF report) from the data folder.
 
-    python -m scripts.make_claim_package                 # demo values
-    python -m scripts.make_claim_package --valuation eeg --eeg 73.3 --ppa 70 --waiting-hours 24
+    python -m scripts.make_claim_package                 # demo values, benchmark prices
+    python -m scripts.make_claim_package --eeg 73.3 --ppa 70
 """
 import argparse
 import warnings
@@ -15,8 +15,6 @@ warnings.filterwarnings("ignore")
 ap = argparse.ArgumentParser()
 ap.add_argument("--data", default="data")
 ap.add_argument("--out", default="outputs")
-ap.add_argument("--valuation", choices=["market", "eeg", "ppa"], default="market",
-                help="headline valuation model (all three are always shown)")
 ap.add_argument("--eeg", type=float, default=None, help="EEG reference value EUR/MWh (default: benchmark)")
 ap.add_argument("--ppa", type=float, default=None, help="PPA price EUR/MWh (default: benchmark)")
 ap.add_argument("--price-basis", default="")
@@ -31,8 +29,6 @@ info = ClaimInfo(
     policy_number="DEMO-0000-00",
     contact_name="Asset Operations Team",
     contact_email="operations@example.com",
-    turbine_model="4.5 MW class",
-    valuation_mode=args.valuation,
     eeg_reference_value=args.eeg,
     ppa_price=args.ppa,
     price_basis=args.price_basis,
@@ -42,6 +38,5 @@ info = ClaimInfo(
 result = run_assessment(args.data)
 files = build_claim_package(result, info, args.out)
 print("Subject:", files["email_subject"])
-for k in ("email", "report", "data", "valuation", "zip"):
-    if k in files:
-        print(f"{k:>9}: {files[k]}")
+for k in ("email", "report"):
+    print(f"{k:>7}: {files[k]}")
