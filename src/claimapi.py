@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import tempfile
 import uuid
 from collections import OrderedDict
 from dataclasses import fields
@@ -35,11 +36,12 @@ from .schema import ClaimInfo
 from .webapi import _frames, _naive, park
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT_DIR = ROOT / "outputs" / "web"
 CLAIM_FIELDS = {f.name for f in fields(ClaimInfo)}
 NUMERIC = {"eeg_reference_value", "ppa_price", "price_eur_per_mwh", "waiting_period_h"}
 _models: "OrderedDict[str, object]" = OrderedDict()
 _CACHE = 6
+_files: "OrderedDict[str, dict]" = OrderedDict()   # claim id -> {filename: bytes}; nothing kept on disk
+_FILES_KEEP = 10
 
 
 def _claim_info(raw: dict) -> ClaimInfo:
@@ -122,12 +124,17 @@ def run_model(payload, store):
     return result
 
 
-def claim(payload, store, out_root: Path = OUT_DIR) -> dict:
+def claim(payload, store) -> dict:
     result = run_model(payload, store)
     info = _claim_info(payload.get("claim"))
     cid = uuid.uuid4().hex[:12]
     stem = re.sub(r"[^A-Za-z0-9]+", "_", info.wind_farm_name or "claim").strip("_")[:40] or "claim"
-    pkg = build_claim_package(result, info, out_root / cid, stem=stem)
+    with tempfile.TemporaryDirectory() as tmp:          # build, read into memory, delete
+        pkg = build_claim_package(result, info, tmp, stem=stem)
+        report_name = Path(pkg["report"]).name
+        _files[cid] = {report_name: Path(pkg["report"]).read_bytes()}
+    if len(_files) > _FILES_KEEP:
+        _files.popitem(last=False)
 
     vals = {}
     for k, v in (pkg.get("valuation_obj") or {}).items():
@@ -148,7 +155,7 @@ def claim(payload, store, out_root: Path = OUT_DIR) -> dict:
                    "hours": result.duration_h},
         "valuation": vals,
         "email": {"subject": pkg["email_subject"], "body": pkg["email_body"]},
-        "files": {"report": f"/api/claim/{cid}/{Path(pkg['report']).name}"},
+        "files": {"report": f"/api/claim/{cid}/{report_name}"},
     }
     return _clean(out)
 
@@ -171,11 +178,11 @@ CTYPES = {".pdf": "application/pdf", ".zip": "application/zip", ".csv": "text/cs
           ".txt": "text/plain; charset=utf-8"}
 
 
-def claim_file(cid: str, name: str, out_root: Path = OUT_DIR):
-    """(bytes, content_type) for a generated file, or None. Only ids/names we created."""
+def claim_file(cid: str, name: str):
+    """(bytes, content_type) for a report generated in this server session, or None."""
     if not SAFE.match(cid) or not SAFE_FILE.match(name):
         return None
-    f = (out_root / cid / name)
-    if not f.is_file():
+    data = _files.get(cid, {}).get(name)
+    if data is None:
         return None
-    return f.read_bytes(), CTYPES.get(f.suffix, "application/octet-stream")
+    return data, CTYPES.get(Path(name).suffix, "application/octet-stream")

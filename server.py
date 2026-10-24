@@ -8,7 +8,7 @@ GET  /             the page, switched to the backend engine
 GET  /health       status + turbines the server has on disk
 POST /api/analyze  page request -> estimate_loss() -> page response (see src/webapi.py)
 POST /api/claim    analysis request + claim form -> email draft, PDF report, CSVs (see src/claimapi.py)
-GET  /api/claim/<id>/<file>   download a generated file
+GET  /api/claim/<id>/<file>   generated report (inline preview; ?download=1 to download)
 """
 import argparse
 import importlib
@@ -60,12 +60,13 @@ class Handler(BaseHTTPRequestHandler):
             parts = path.split("/")
             got = src.claimapi.claim_file(parts[3], parts[4]) if len(parts) == 5 else None
             if got is None:
-                return self._send(404, json.dumps({"error": "not found"}))
+                return self._send(404, json.dumps({"error": "not found (reports live in memory - generate again)"}))
             data, ctype = got
+            disposition = "attachment" if "download=1" in self.path else "inline"   # inline = preview in the page
             self.send_response(200)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Content-Disposition", f'attachment; filename="{parts[4]}"')
+            self.send_header("Content-Disposition", f'{disposition}; filename="{parts[4]}"')
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(data)
