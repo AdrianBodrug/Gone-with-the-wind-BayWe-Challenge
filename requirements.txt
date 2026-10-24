@@ -1,0 +1,9 @@
+pandas>=2.0
+numpy
+openpyxl
+scikit-learn
+matplotlib
+jinja2
+fpdf2>=2.7
+streamlit
+plotly

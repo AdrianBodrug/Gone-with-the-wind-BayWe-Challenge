@@ -182,9 +182,36 @@ requirements.txt
 - Any model change must come with backtest numbers vs. the current baseline.
 - Keep the method explainable in one sentence.
 
-## 9. Run locally *(once code lands)*
+## 9. Run locally
 
 ```bash
 pip install -r requirements.txt
-streamlit run app.py
+python -m scripts.make_claim_package                                  # demo claim package -> outputs/
+python -m scripts.make_claim_package --price 73.5 --waiting-hours 24  # with valuation + deductible
+streamlit run app.py                                                  # GUI (coming)
 ```
+
+## 10. Claim deliverables (B7 / B8) — `src/report.py`
+
+One call produces everything the insurer needs. It only reads the `AssessmentResult` contract (`src/schema.py`), so it keeps working when the model is swapped.
+
+```python
+from src.baseline_model import run_assessment
+from src.report import build_email, build_report_pdf, build_claim_package
+from src.schema import ClaimInfo
+
+result = run_assessment("data")          # any model returning AssessmentResult
+info = ClaimInfo(wind_farm_name="...", insurer_name="...", policy_number="...",
+                 price_eur_per_mwh=None, waiting_period_h=None)   # user-supplied facts
+
+email = build_email(result, info)        # {"subject", "body", "full"} -> copy-paste box in the GUI
+pkg = build_claim_package(result, info, "outputs")   # .txt + .pdf + .csv + .zip
+```
+
+| Output | Contents |
+|---|---|
+| Email draft (`templates/claim_email.txt.j2`) | What happened, lost MWh (P50 + P10–P90, per turbine), optional EUR value and waiting-period figure, 2-line method + accuracy, metering-data caveat, attachments list |
+| PDF report (4 pages) | 1 Summary & outage details · 2 Wind + energy charts · 3 Method, accuracy table, validation scatter, limitations · A Audit trail: model version, regression weights, SHA-256 of every input file |
+| CSV | 10-min reconstructed wind (P10/P50/P90), expected power, energy per turbine |
+
+Design rules: missing facts render as visible `[placeholders]` — the tool never invents policy numbers, prices or deductibles; the email is a draft for human review, never sent automatically. See `docs/sample_claim/` for example output.

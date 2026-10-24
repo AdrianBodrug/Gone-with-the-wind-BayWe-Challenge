@@ -1,0 +1,45 @@
+Subject: Business interruption notification – {{ farm }} – outage {{ start_date }} to {{ end_date }}{% if claim_reference %} – Ref. {{ claim_reference }}{% endif %}
+
+Dear {{ insurer }} claims team,
+
+We are writing to notify you of a business interruption at {{ farm }}{% if location %} ({{ location }}){% endif %}, insured under policy {{ policy_number }}.
+
+WHAT HAPPENED
+On {{ start_long }}, the communication connection to the wind farm was lost and remained unavailable until {{ end_long }} ({{ timezone_label }}), a duration of {{ duration_h }} hours. {{ cause }}
+{% if repair_status %}Current status: {{ repair_status }}
+{% endif %}
+Affected turbines: {{ turbine_list }}{% if turbine_model %} ({{ turbine_model }}){% endif %}.
+
+ESTIMATED ENERGY YIELD LOSS
+Because the turbines' own wind measurements are unavailable for this period, we reconstructed the wind conditions from reference wind farms nearby and applied the turbines' power curves.
+
+  Estimated lost energy (best estimate, P50):  {{ e_p50 }} MWh
+  Likely range (P10 – P90):                    {{ e_p10 }} – {{ e_p90 }} MWh
+{% for t in turbines %}    {{ t.name }}: {{ t.p50 }} MWh (range {{ t.p10 }} – {{ t.p90 }} MWh)
+{% endfor %}{% if waiting_period_h is not none %}
+Energy lost beyond the {{ waiting_period_h }}-hour waiting period: {{ e_after_wp }} MWh (P50).
+{% endif %}{% if price %}
+Valued at {{ price }} EUR/MWh{% if price_basis %} ({{ price_basis }}){% endif %}, this corresponds to approximately EUR {{ value_p50 }} (range EUR {{ value_p10 }} – {{ value_p90 }}){% if waiting_period_h is not none %}, or EUR {{ value_after_wp }} after the waiting period{% endif %}.
+{% else %}
+[Valuation: please insert the applicable remuneration in EUR/MWh and its basis, e.g. EEG value or PPA price.]
+{% endif %}
+METHOD AND ACCURACY
+{{ method_summary }}
+On historical periods where actual measurements are known, the method reconstructed wind speed with a typical error of {{ bt_ws_rmse }} m/s (RMSE, {{ n_windows }} test windows of 3 days) and the energy over a 3-day window with a typical deviation of ±{{ bt_energy_err }}%. Full details, charts and the input-data fingerprints are in the attached report.
+
+PLEASE NOTE
+This is an estimate based on reference data. Since the outage concerned the communication connection, we will provide the grid operator's metering data for the period to confirm that no energy was fed into the grid. We will update this notification if the final figures differ.
+
+ATTACHMENTS
+  1. {{ report_filename }} – energy loss assessment report
+  2. {{ data_filename }} – reconstructed 10-minute time series for the outage period
+
+Please let us know if you need further information or would like to arrange a call.
+
+Kind regards,
+
+{{ contact_name }}
+{{ operator }}
+{% if contact_email %}{{ contact_email }}
+{% endif %}{% if contact_phone %}{{ contact_phone }}
+{% endif %}
