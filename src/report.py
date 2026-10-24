@@ -80,7 +80,7 @@ def _extras_text(ex: dict, max_len: int = 62) -> str:
         if not k.startswith("h_"):
             parts.append(f"{EXTRA_SHORT.get(k, k)} {v:+.2f}")
     if n_h:
-        parts.append(f"direction curve ({n_h} terms)")
+        parts.append(f"dir. curve ({n_h} terms)")
     txt = ", ".join(parts)
     return txt if len(txt) <= max_len else txt[: max_len - 1] + "…"
 
@@ -435,9 +435,9 @@ def _valuation_section(pdf, v: Valuation, ctx):
         rows = [["Average day-ahead price in window", f"{m.avg_market_price:,.2f} EUR/MWh"],
                 ["Negative-price intervals", f"{m.n_negative_intervals} ({m.energy_negative_mwh:,.1f} MWh)"],
                 ["Provisionally priced share", f"{m.share_provisional:.0%}"],
-                ["Price data", {"live": "downloaded live", "cache": "local cache (offline)",
+                ["Price data", {"dataset": "historic price dataset in the repository",
                                 "supplied": "supplied"}.get(m.price_source, m.price_source)
-                 + (f"; published until {m.price_coverage_until:%d %b %Y %H:%M}" if m.price_coverage_until is not None else "")]]
+                 + (f"; covers until {m.price_coverage_until:%d %b %Y %H:%M}" if m.price_coverage_until is not None else "")]]
         if v.eur_after_waiting is not None:
             rows.append([f"Headline value beyond waiting period", f"EUR {_eur(v.eur_after_waiting)}"])
         pdf.kv_table(rows, w1=62)

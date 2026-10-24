@@ -1,26 +1,23 @@
 """Day-ahead prices and monetary valuation of the lost energy.
 
-Prices are fetched live for exactly the outage window from the Energy-Charts API
-(Fraunhofer ISE; data Bundesnetzagentur | SMARD.de, CC BY 4.0). No API key needed.
-Every successful download is cached in data/prices/ so the tool still works offline.
+Prices come from one file in the repo, data/prices/day_ahead_DE-LU.csv
+(timestamp_utc, eur_per_mwh): German day-ahead prices since Jan 2024 - hourly until
+Sep 2025, quarter-hourly since Oct 2025. Source: Bundesnetzagentur | SMARD.de via the
+Energy-Charts API (Fraunhofer ISE), licence CC BY 4.0. No internet access at run time;
+refresh the file with `python -m scripts.update_prices`.
 
-    from src.pricing import value_loss
-    v = value_loss(result, mode="market")                 # time-matched day-ahead prices
-    v = value_loss(result, mode="eeg", price=73.5)        # EEG reference value, 0 in negative hours
-    v = value_loss(result, mode="fixed", price=80.0)      # PPA / fixed tariff
+    from src.pricing import value_loss, value_all
+    v = value_loss(result, mode="market")            # price of each interval
+    v = value_loss(result, mode="eeg", price=73.3)   # EEG market premium
+    v = value_loss(result, mode="ppa", price=80.0)   # fixed PPA price
 
-Day-ahead prices for day D are published around 13:00 CET on day D-1. For an outage that
-runs into hours without published prices (e.g. an outage still ongoing), those hours are
-valued *provisionally* by repeating the last published day's price profile, and flagged.
+Intervals after the end of the file (e.g. an outage still ongoing) are valued
+*provisionally* by repeating the last day in the file, and flagged.
 """
 from __future__ import annotations
 
-import json
-import ssl
-import urllib.error
-import urllib.parse
-import urllib.request
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 
@@ -29,13 +26,11 @@ import pandas as pd
 
 from .schema import AssessmentResult
 
-API_URL = "https://api.energy-charts.info/price"
 BIDDING_ZONE = "DE-LU"
 LOCAL_TZ = "Europe/Berlin"
-LAST_FETCH_ERROR: Optional[str] = None   # why the last live download failed (shown in reports)
-CACHE_DIR = Path(__file__).resolve().parents[1] / "data" / "prices"
-ATTRIBUTION = ("Day-ahead prices: Bundesnetzagentur | SMARD.de, via Energy-Charts API "
-               "(Fraunhofer ISE), licence CC BY 4.0")
+PRICE_FILE = Path(__file__).resolve().parents[1] / "data" / "prices" / "day_ahead_DE-LU.csv"
+ATTRIBUTION = ("Day-ahead prices: Bundesnetzagentur | SMARD.de, via Energy-Charts (Fraunhofer ISE), "
+               "licence CC BY 4.0")
 MODES = {
     "market": "day-ahead market price (EPEX Spot, DE-LU) for each interval",
     "eeg": "EEG market premium: day-ahead price + max(0, reference value − monthly market value "
@@ -59,13 +54,13 @@ PPA_DEFAULT_EUR_MWH = 73.13
 PPA_DEFAULT_SOURCE = ("German onshore wind pay-as-produced PPA benchmark, national average "
                       "73.13 EUR/MWh (Veyt, 2025)")
 # Official monthly market values of onshore wind ("Marktwert Wind an Land", EUR/MWh),
-# published by the TSOs on netztransparenz.de. Months not listed are estimated live.
+# published by the TSOs on netztransparenz.de. For months not listed, the value of the lost
+# energy itself is used as a proxy (and labelled as such in the report).
 OFFICIAL_WIND_MARKET_VALUE = {
     (2026, 8): 115.45,
     (2026, 9): 109.40,
 }
 WIND_MV_SOURCE_OFFICIAL = "official monthly market value (netztransparenz.de)"
-WIND_MV_SOURCE_ESTIMATE = "estimated from Energy-Charts onshore wind generation x day-ahead price"
 
 
 # ================================================================ time handling
@@ -82,71 +77,17 @@ def to_utc(local_naive) -> pd.DatetimeIndex:
     return loc.tz_convert("UTC")
 
 
-# ================================================================ fetching
-def _parse(payload: dict) -> pd.Series:
-    ts = pd.to_datetime(payload["unix_seconds"], unit="s", utc=True)
-    s = pd.Series(payload["price"], index=ts, dtype="float64", name="eur_per_mwh").dropna()
-    return s[~s.index.duplicated()].sort_index()
-
-
-def _ssl_context() -> ssl.SSLContext:
-    """Use certifi's CA bundle when available - python.org builds on macOS ship without
-    system certificates ('CERTIFICATE_VERIFY_FAILED')."""
-    try:
-        import certifi
-        return ssl.create_default_context(cafile=certifi.where())
-    except Exception:
-        return ssl.create_default_context()
-
-
-def _download(start_utc: pd.Timestamp, end_utc: pd.Timestamp, bzn: str, timeout: float) -> dict:
-    # request whole local days with one day of margin; the API takes local dates
-    d0 = (start_utc.tz_convert(LOCAL_TZ) - pd.Timedelta("1D")).strftime("%Y-%m-%d")
-    d1 = (end_utc.tz_convert(LOCAL_TZ) + pd.Timedelta("1D")).strftime("%Y-%m-%d")
-    url = f"{API_URL}?{urllib.parse.urlencode({'bzn': bzn, 'start': d0, 'end': d1})}"
-    req = urllib.request.Request(url, headers={"User-Agent": "baywa-outage-loss-tool/0.1"})
-    with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as r:
-        payload = json.loads(r.read().decode())
-    payload["_request"] = {"url": url, "fetched_utc": pd.Timestamp.now(tz="UTC").isoformat()}
-    return payload
-
-
-def _load_cache(bzn: str) -> pd.Series:
-    parts = []
-    for f in sorted(CACHE_DIR.glob(f"{bzn}_*.json")):
-        try:
-            parts.append(_parse(json.loads(f.read_text())))
-        except Exception:
-            continue
-    if not parts:
+# ================================================================ price data
+@lru_cache(maxsize=4)
+def load_prices(path: str = str(PRICE_FILE)) -> pd.Series:
+    """Day-ahead prices (EUR/MWh) indexed by UTC interval start. Empty if the file is missing."""
+    f = Path(path)
+    if not f.exists():
         return pd.Series(dtype="float64", name="eur_per_mwh")
-    s = pd.concat(parts)
-    return s[~s.index.duplicated(keep="last")].sort_index()
-
-
-def fetch_day_ahead(start_utc, end_utc, bzn: str = BIDDING_ZONE, timeout: float = 20,
-                    use_cache: bool = True, offline: bool = False) -> tuple[pd.Series, str]:
-    """Prices (EUR/MWh, UTC index, interval start) covering [start_utc, end_utc].
-
-    Returns (prices, source) with source 'live' or 'cache'. Live results are cached.
-    """
-    global LAST_FETCH_ERROR
-    start_utc, end_utc = pd.Timestamp(start_utc), pd.Timestamp(end_utc)
-    if not offline:
-        try:
-            payload = _download(start_utc, end_utc, bzn, timeout)
-            s = _parse(payload)
-            if use_cache and len(s):
-                CACHE_DIR.mkdir(parents=True, exist_ok=True)
-                name = f"{bzn}_{s.index[0]:%Y%m%dT%H%M}_{s.index[-1]:%Y%m%dT%H%M}.json"
-                (CACHE_DIR / name).write_text(json.dumps(payload))
-            LAST_FETCH_ERROR = None
-            return s, "live"
-        except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError) as e:
-            LAST_FETCH_ERROR = f"{type(e).__name__}: {getattr(e, 'reason', e)}"
-            import warnings
-            warnings.warn(f"Live day-ahead price download failed ({LAST_FETCH_ERROR}); using local cache.")
-    return _load_cache(bzn), "cache"
+    df = pd.read_csv(f)
+    s = pd.Series(df["eur_per_mwh"].to_numpy(float), index=pd.to_datetime(df["timestamp_utc"], utc=True),
+                  name="eur_per_mwh").dropna()
+    return s[~s.index.duplicated()].sort_index()
 
 
 # ================================================================ matching
@@ -189,47 +130,11 @@ def provisional_profile(t_utc: pd.DatetimeIndex, prices: pd.Series, days: int = 
 
 
 # ================================================================ wind market value
-def _get_json(endpoint: str, params: dict, timeout: float = 30) -> dict:
-    url = f"https://api.energy-charts.info/{endpoint}?{urllib.parse.urlencode(params)}"
-    req = urllib.request.Request(url, headers={"User-Agent": "baywa-outage-loss-tool/0.1"})
-    with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as r:
-        return json.loads(r.read().decode())
-
-
-def wind_market_value(year: int, month: int, offline: bool = False) -> tuple[Optional[float], str]:
-    """Monthly market value of German onshore wind (EUR/MWh) for the EEG premium.
-
-    Official value if known; otherwise generation-weighted day-ahead price of onshore wind for
-    that month (month-to-date if running), computed live and cached. Note: the live estimate ran
-    ~7 % above the official value for Sep 2026 (117.6 vs 109.4) - treat it as indicative.
-    """
+def wind_market_value(year: int, month: int) -> tuple[Optional[float], str]:
+    """Official monthly market value of German onshore wind (EUR/MWh), or (None, reason)."""
     if (year, month) in OFFICIAL_WIND_MARKET_VALUE:
         return OFFICIAL_WIND_MARKET_VALUE[(year, month)], WIND_MV_SOURCE_OFFICIAL
-    cache = CACHE_DIR / f"wind_mv_{year}{month:02d}.json"
-    if cache.exists():
-        c = json.loads(cache.read_text())
-        if c.get("complete"):
-            return c["value"], WIND_MV_SOURCE_ESTIMATE
-    if offline:
-        return None, "unavailable (offline)"
-    start = pd.Timestamp(year=year, month=month, day=1)
-    end = (start + pd.offsets.MonthEnd(1))
-    try:
-        rng = {"start": f"{start:%Y-%m-%d}", "end": f"{end:%Y-%m-%d}"}
-        gen = _get_json("public_power", {"country": "de", **rng})
-        pr = _get_json("price", {"bzn": BIDDING_ZONE, **rng})
-        wind = next(t["data"] for t in gen["production_types"] if t["name"] == "Wind onshore")
-        g = pd.Series(wind, index=gen["unix_seconds"], dtype="float64")
-        p = pd.Series(pr["price"], index=pr["unix_seconds"], dtype="float64")
-        p = p.reindex(g.index).ffill(limit=3)        # hourly prices before Oct 2025
-        ok = g.notna() & p.notna()
-        value = float((g[ok] * p[ok]).sum() / g[ok].sum())
-        complete = pd.Timestamp.now(tz=LOCAL_TZ).tz_localize(None) > end + pd.Timedelta("1D")
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        cache.write_text(json.dumps({"value": value, "complete": bool(complete)}))
-        return value, WIND_MV_SOURCE_ESTIMATE + ("" if complete else " (month to date)")
-    except Exception as e:  # network / format problems -> caller falls back
-        return None, f"unavailable ({type(e).__name__})"
+    return None, "not in table"
 
 
 # ================================================================ valuation
@@ -246,7 +151,7 @@ class Valuation:
     share_provisional: float        # share of lost energy valued with provisional prices
     n_negative_intervals: int
     energy_negative_mwh: float
-    price_source: str               # live / cache / supplied / n.a.
+    price_source: str               # dataset / supplied / n.a.
     price_coverage_until: Optional[pd.Timestamp]
     unit_price: Optional[float] = None          # EEG reference value or PPA price used
     unit_price_source: str = ""                  # "operator" or the default's source
@@ -269,10 +174,10 @@ def _farm_series(result: AssessmentResult):
     return t_utc, t_utc.tz_convert(LOCAL_TZ).tz_localize(None), (farm / 6 / 1000).to_numpy()
 
 
-def _interval_prices(t_utc, prices, offline):
+def _interval_prices(t_utc, prices):
     source = "supplied"
     if prices is None:
-        prices, source = fetch_day_ahead(t_utc.min(), t_utc.max(), offline=offline)
+        prices, source = load_prices(), "dataset"
     p = match_prices(t_utc, prices).to_numpy().copy()
     provisional = np.isnan(p)
     if provisional.any() and not prices.empty:
@@ -283,7 +188,7 @@ def _interval_prices(t_utc, prices, offline):
 
 def value_loss(result: AssessmentResult, mode: str = "market", price: Optional[float] = None,
                waiting_period_h: Optional[float] = None, prices: Optional[pd.Series] = None,
-               offline: bool = False, _cache: Optional[dict] = None) -> Optional[Valuation]:
+               offline: bool = True, _cache: Optional[dict] = None) -> Optional[Valuation]:
     """Monetary value of the lost energy (P50, with P10/P90 scaled by the energy range).
 
     market: lost MWh x day-ahead price per interval (negative -> 0: the plant would curtail).
@@ -310,7 +215,7 @@ def value_loss(result: AssessmentResult, mode: str = "market", price: Optional[f
     if mode in ("market", "eeg"):
         cached = (_cache or {}).get("prices")
         if cached is None:
-            cached = _interval_prices(t_utc, prices, offline)
+            cached = _interval_prices(t_utc, prices)
             if _cache is not None:
                 _cache["prices"] = cached
         p, provisional, source, last_pub, _ = cached
@@ -323,7 +228,7 @@ def value_loss(result: AssessmentResult, mode: str = "market", price: Optional[f
         months = pd.PeriodIndex(local, freq="M")
         mv = np.full(len(e_mwh), np.nan)
         for m in months.unique():
-            val, src = wind_market_value(m.year, m.month, offline=offline)
+            val, src = wind_market_value(m.year, m.month)
             if val is None:     # fall back to the value of the lost energy itself
                 sel = months == m
                 w = e_mwh[sel] * np.clip(p[sel], 0, None)
@@ -365,7 +270,7 @@ def value_loss(result: AssessmentResult, mode: str = "market", price: Optional[f
 
 def value_all(result: AssessmentResult, eeg_price: Optional[float] = None, ppa_price: Optional[float] = None,
               waiting_period_h: Optional[float] = None, prices: Optional[pd.Series] = None,
-              offline: bool = False) -> dict:
+              offline: bool = True) -> dict:
     """All three valuations with a single price download: {'market', 'eeg', 'ppa'} -> Valuation|None."""
     cache: dict = {}
     return {
@@ -404,9 +309,9 @@ def describe(v: Valuation, price: Optional[float] = None) -> str:
                      f"({v.energy_negative_mwh:,.1f} MWh) are valued at zero ({rule}).")
     if v.is_provisional and v.mode != "ppa":
         until = f"{v.price_coverage_until:%d %b %Y %H:%M}" if v.price_coverage_until is not None else "n/a"
-        parts.append(f"Day-ahead prices are published only up to {until}; {v.share_provisional:.0%} of the "
-                     f"lost energy is therefore valued provisionally by repeating the last published day's "
-                     f"price profile and will be updated once prices are published.")
+        parts.append(f"The price dataset ends at {until}; {v.share_provisional:.0%} of the lost energy is "
+                     f"therefore valued provisionally by repeating the last day's price profile and will be "
+                     f"updated once the dataset is refreshed.")
     if v.eur_after_waiting is not None:
         parts.append(f"Beyond the waiting period: EUR {f(v.eur_after_waiting)} (P50).")
     return " ".join(parts)

@@ -7,5 +7,3 @@ venv/
 .ipynb_checkpoints/
 predictions_*.csv
 outputs/
-data/prices/*
-!data/prices/DE-LU_20260830T2200_20260904T2145.json
