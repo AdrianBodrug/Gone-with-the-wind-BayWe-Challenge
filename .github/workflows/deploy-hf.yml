@@ -1,0 +1,27 @@
+name: Deploy to Hugging Face Space
+
+# Every push to main publishes the app to the Space. Needs the repository secret HF_TOKEN
+# (Hugging Face access token with write permission). Optional repository variable HF_SPACE
+# (e.g. "my-user/windgap"); default is <token owner>/windgap.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-hf
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install huggingface_hub
+      - run: python scripts/deploy_hf.py
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE: ${{ vars.HF_SPACE }}

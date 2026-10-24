@@ -3,6 +3,7 @@
     python server.py                  # http://localhost:8000
     python server.py --port 8080 --data data
     python server.py --reload         # re-import src/ on every request (while changing the model)
+    HOST=0.0.0.0 PORT=7860 python server.py   # cloud hosting (Dockerfile, Hugging Face Space)
 
 GET  /             the page, switched to the backend engine
 GET  /health       status + turbines the server has on disk
@@ -13,6 +14,7 @@ GET  /api/claim/<id>/<file>   generated report (inline preview; ?download=1 to d
 import argparse
 import importlib
 import json
+import os
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -104,10 +106,10 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)))
     ap.add_argument("--data", default=str(ROOT / "data"))
     ap.add_argument("--reload", action="store_true")
-    ap.add_argument("--host", default="127.0.0.1",
+    ap.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"),
                     help="127.0.0.1 = this computer only; 0.0.0.0 = reachable from the network / cloud hosting")
     args = ap.parse_args()
     Handler.store = src.webapi.Store(args.data)
