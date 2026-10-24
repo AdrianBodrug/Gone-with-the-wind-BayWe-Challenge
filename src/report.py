@@ -25,6 +25,7 @@ import pandas as pd  # noqa: E402
 from fpdf import FPDF  # noqa: E402
 from jinja2 import Environment, FileSystemLoader  # noqa: E402
 
+from .pricing import MODE_ALIASES, Valuation, comparison_line, describe, value_all  # noqa: E402
 from .schema import AssessmentResult, ClaimInfo  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,9 +65,22 @@ def _mean_metric(result, key):
     return float(np.mean([t.metrics[key] for t in result.turbines]))
 
 
+def primary_mode(info: ClaimInfo) -> str:
+    return MODE_ALIASES.get(info.valuation_mode or "market", info.valuation_mode or "market")
+
+
+def compute_valuation(result: AssessmentResult, info: ClaimInfo, offline: bool = False) -> dict:
+    """All three valuations {'market','eeg','ppa'} (one price download). Values may be None."""
+    mode = primary_mode(info)
+    eeg = info.eeg_reference_value or (info.price_eur_per_mwh if mode == "eeg" else None)
+    ppa = info.ppa_price or (info.price_eur_per_mwh if mode == "ppa" else None)
+    return value_all(result, eeg, ppa, info.waiting_period_h, offline=offline)
+
+
 def build_context(result: AssessmentResult, info: ClaimInfo,
                   report_filename="energy_loss_report.pdf",
-                  data_filename="outage_timeseries.csv") -> dict:
+                  data_filename="outage_timeseries.csv",
+                  valuation: dict | None = None) -> dict:
     farm = result.farm_energy_kwh()
     s, e = result.outage_start, result.outage_end + pd.Timedelta(minutes=10)
     tz_label = "local time, Europe/Berlin" if result.timezone == "Europe/Berlin" else result.timezone
@@ -99,12 +113,20 @@ def build_context(result: AssessmentResult, info: ClaimInfo,
     if info.waiting_period_h is not None:
         after_wp = _energy_after_waiting_period(result, info.waiting_period_h)
         ctx.update(waiting_period_h=f"{info.waiting_period_h:g}", e_after_wp=_mwh(after_wp))
-    if info.price_eur_per_mwh:
-        p = info.price_eur_per_mwh
-        ctx.update(price=f"{p:,.2f}", value_p10=_eur(farm["p10"] / 1000 * p),
-                   value_p50=_eur(farm["p50"] / 1000 * p), value_p90=_eur(farm["p90"] / 1000 * p))
-        if after_wp is not None:
-            ctx["value_after_wp"] = _eur(after_wp / 1000 * p)
+    vals = valuation if valuation is not None else compute_valuation(result, info)
+    mode = primary_mode(info)
+    if vals.get(mode) is None:                      # e.g. no prices -> fall back to PPA
+        mode = next((k for k in ("market", "eeg", "ppa") if vals.get(k) is not None), mode)
+    v = vals.get(mode)
+    ctx.update(valuation=v, valuations=vals, valuation_text=None,
+               valuation_missing="day-ahead prices could not be retrieved; please value manually or retry when online")
+    if v is not None:
+        ctx.update(valuation_text=(describe(v) + " " + comparison_line(vals, mode)).strip(),
+                   value_p10=_eur(v.eur["p10"]), value_p50=_eur(v.eur["p50"]), value_p90=_eur(v.eur["p90"]),
+                   valuation_basis=v.basis[0].upper() + v.basis[1:] + (f" – {info.price_basis}" if info.price_basis else ""),
+                   price=f"{info.price_eur_per_mwh:,.2f}" if info.price_eur_per_mwh else None)
+        if v.eur_after_waiting is not None:
+            ctx["value_after_wp"] = _eur(v.eur_after_waiting)
     return ctx
 
 
@@ -250,7 +272,7 @@ class _ReportPDF(FPDF):
         self.set_y(-12)
         self.set_font("DejaVu", "", 7)
         self.set_text_color(*GREY)
-        self.cell(0, 5, "Estimate based on reference wind data – see section 4 for limitations.", align="L")
+        self.cell(0, 5, "Estimate based on reference wind data – see section 5 for limitations.", align="L")
         self.cell(0, 5, f"Page {self.page_no()}/{{nb}}", align="R")
 
     # building blocks
@@ -279,6 +301,8 @@ class _ReportPDF(FPDF):
     def kv_table(self, rows, w1=52):
         self.set_font("DejaVu", "", 8.8)
         for i, (k, v) in enumerate(rows):
+            if self.get_y() + 12 > self.page_break_trigger:   # keep key + value on one page
+                self.add_page()
             self.set_fill_color(*(LIGHT if i % 2 == 0 else (255, 255, 255)))
             y = self.get_y()
             self.set_text_color(*GREY)
@@ -315,9 +339,98 @@ class _ReportPDF(FPDF):
         self.ln(2)
 
 
-def build_report_pdf(result: AssessmentResult, info: ClaimInfo, path: str | Path) -> Path:
+def chart_prices(v: Valuation) -> io.BytesIO:
+    s = v.series
+    fig, ax = plt.subplots(figsize=(8, 2.6))
+    ax2 = ax.twinx()
+    ax2.fill_between(s.timestamp, s.lost_mwh * 6, color=C_TEAL, alpha=0.18, lw=0, step="post")
+    ax2.set_ylabel("Lost farm power (MW)", fontsize=8, color=C_TEAL)
+    ax2.tick_params(colors=C_TEAL, labelsize=8)
+    for sp in ("top",):
+        ax2.spines[sp].set_visible(False)
+    pub, prov = s[~s.provisional], s[s.provisional]
+    ax.step(pub.timestamp, pub.price_eur_per_mwh, where="post", color=C_NAVY, lw=1.1, label="Day-ahead price")
+    if len(prov):
+        ax.step(prov.timestamp, prov.price_eur_per_mwh, where="post", color=C_ORANGE, lw=1.1, ls="--",
+                label="Provisional (not yet published)")
+    ax.axhline(0, color=C_GREY, lw=0.6)
+    ax.set_ylabel("EUR/MWh", fontsize=8)
+    ax.set_zorder(ax2.get_zorder() + 1)
+    ax.patch.set_visible(False)
+    ax.legend(fontsize=7, frameon=False, loc="upper left", ncol=2)
+    ax.xaxis.set_major_locator(mdates.DayLocator())
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%d %b"))
+    _style(ax)
+    fig.tight_layout()
+    return _png(fig)
+
+
+def _valuation_section(pdf, v: Valuation, ctx):
+    pdf.add_page()
+    pdf.h2("4  Valuation")
+    vals = ctx["valuations"]
+    pdf.para("Which value applies depends on how the wind farm sells its electricity. All three common "
+             "models are shown; the headline figure uses the " + v.label.lower() + " model.", size=9)
+    rows = []
+    for k in ("market", "eeg", "ppa"):
+        x = vals.get(k)
+        if x is None:
+            rows.append([MODE_LABEL_SHORT[k], "prices unavailable", "", "", ""])
+            continue
+        if k == "market":
+            basis = "day-ahead price per interval"
+        elif k == "eeg":
+            mv = ", ".join(f"{val:,.1f}" for val, _ in x.market_values.values())
+            basis = f"ref. value {x.unit_price:,.2f} vs market value {mv}"
+        else:
+            basis = f"fixed {x.unit_price:,.2f} EUR/MWh"
+        rows.append([MODE_LABEL_SHORT[k] + (" ★" if k == v.mode else ""), basis, _eur(x.eur["p50"]),
+                     f"{_eur(x.eur['p10'])} – {_eur(x.eur['p90'])}", f"{x.avg_value_eur_per_mwh:,.2f}"])
+    pdf.grid_table(["Model", "Price basis", "EUR P50", "EUR P10 – P90", "EUR/MWh"], rows,
+                   [30, 66, 22, 38, 22], align=["L", "L", "R", "R", "R"], size=7.8)
+    pdf.caption("★ = headline model. EUR/MWh = average value per lost MWh. EEG: under the market premium model the operator sells at the market and "
+                "receives max(0, reference value − monthly market value of onshore wind) on top; no payment in "
+                "negative-price intervals (§51 EEG). PPA: fixed pay-as-produced price.")
+    pdf.para(ctx["valuation_text"], size=8.8)
+    notes = []
+    for k in ("eeg", "ppa"):
+        x = vals.get(k)
+        if x is not None and x.unit_price_source not in ("", "operator"):
+            notes.append(f"{PRICE_NAME[k]} not provided by the operator – benchmark used: "
+                         f"{x.unit_price:,.2f} EUR/MWh ({x.unit_price_source}).")
+        if k == "eeg" and x is not None:
+            for m, (val, src) in x.market_values.items():
+                notes.append(f"Market value onshore wind {m}: {val:,.2f} EUR/MWh – {src}.")
+    if notes:
+        pdf.set_font("DejaVu", "B", 8.5)
+        pdf.set_text_color(*NAVY)
+        pdf.cell(0, 5, "Assumptions", new_x="LMARGIN", new_y="NEXT")
+        pdf.para("\n".join("• " + n for n in notes), size=8)
+    if v.avg_market_price is not None or (vals.get("market") is not None):
+        m = vals.get("market") or v
+        rows = [["Average day-ahead price in window", f"{m.avg_market_price:,.2f} EUR/MWh"],
+                ["Negative-price intervals", f"{m.n_negative_intervals} ({m.energy_negative_mwh:,.1f} MWh)"],
+                ["Provisionally priced share", f"{m.share_provisional:.0%}"],
+                ["Price data", {"live": "downloaded live", "cache": "local cache (offline)",
+                                "supplied": "supplied"}.get(m.price_source, m.price_source)
+                 + (f"; published until {m.price_coverage_until:%d %b %Y %H:%M}" if m.price_coverage_until is not None else "")]]
+        if v.eur_after_waiting is not None:
+            rows.append([f"Headline value beyond waiting period", f"EUR {_eur(v.eur_after_waiting)}"])
+        pdf.kv_table(rows, w1=62)
+        pdf.ln(2)
+        pdf.image_buf(chart_prices(m))
+        pdf.caption("Figure 4 – Day-ahead price per interval (line) and lost farm power (shaded). Each 10-minute "
+                    "slice of lost energy is valued at the price of the interval it falls in. " + m.attribution + ".")
+
+
+MODE_LABEL_SHORT = {"market": "Market", "eeg": "EEG premium", "ppa": "PPA"}
+PRICE_NAME = {"eeg": "EEG reference value", "ppa": "PPA price"}
+
+
+def build_report_pdf(result: AssessmentResult, info: ClaimInfo, path: str | Path,
+                     valuation: dict | None = None) -> Path:
     path = Path(path)
-    ctx = build_context(result, info)
+    ctx = build_context(result, info, valuation=valuation)
     farm = result.farm_energy_kwh()
     generated = datetime.now().strftime("%d %b %Y %H:%M")
     pdf = _ReportPDF("Energy Yield Loss Assessment", f"{ctx['farm']}  ·  generated {generated}")
@@ -351,10 +464,13 @@ def build_report_pdf(result: AssessmentResult, info: ClaimInfo, path: str | Path
     pdf.set_font("DejaVu", "", 8.5)
     pdf.set_text_color(31, 41, 51)
     line = f"Over {ctx['duration_h']} h for {len(result.turbines)} turbines."
-    if ctx["price"]:
-        line += f"  Value at {ctx['price']} EUR/MWh: EUR {ctx['value_p50']} (EUR {ctx['value_p10']} – {ctx['value_p90']})."
+    v = ctx["valuation"]
+    if v is not None:
+        line += (f"  Value: EUR {ctx['value_p50']} (EUR {ctx['value_p10']} – {ctx['value_p90']}), "
+                 + {"market": "day-ahead market", "eeg": "EEG market premium", "ppa": "PPA price"}[v.mode]
+                 + (" – partly provisional" if v.is_provisional else "") + ".")
     else:
-        line += "  Monetary value: insert remuneration (EUR/MWh) to calculate."
+        line += "  Monetary value: choose a valuation basis to calculate."
     pdf.multi_cell(165, 4.5, line)
     pdf.set_y(y0 + 38)
 
@@ -371,6 +487,8 @@ def build_report_pdf(result: AssessmentResult, info: ClaimInfo, path: str | Path
     ]
     if ctx["repair_status"]:
         rows.append(("Status", ctx["repair_status"]))
+    if v is not None:
+        rows.append(("Valuation basis", ctx["valuation_basis"]))
     if ctx["waiting_period_h"]:
         rows.append(("Waiting period", f"{ctx['waiting_period_h']} h → {ctx['e_after_wp']} MWh (P50) beyond the waiting period"
                      + (f", EUR {ctx['value_after_wp']}" if ctx.get("value_after_wp") else "")))
@@ -398,9 +516,12 @@ def build_report_pdf(result: AssessmentResult, info: ClaimInfo, path: str | Path
     pdf.caption("Figure 2 – Left: expected power per turbine during the outage. Right: cumulative lost energy for "
                 "the wind farm with P10–P90 band.")
 
-    # ------------------------------------------------ page 3: method & accuracy
+    # ------------------------------------------------ valuation + method & accuracy
+    if v is not None:
+        _valuation_section(pdf, v, ctx)
+
     pdf.add_page()
-    pdf.h2("4  Method, accuracy and limitations")
+    pdf.h2("5  Method, accuracy and limitations")
     pdf.para(result.method_summary)
     pdf.para("Why this method: every number can be checked by hand. Each reference has one weight and one "
              "time shift (Appendix A); non-negative weights mean stronger wind at a reference can never lower "
@@ -429,7 +550,8 @@ def build_report_pdf(result: AssessmentResult, info: ClaimInfo, path: str | Path
              "maintenance or grid limits during the outage are not included.\n"
              "• Loss of communication does not by itself prove a production stop. The grid operator's metering "
              "data for the period should be used to confirm that no energy was fed in.\n"
-             "• Monetary value, waiting period and policy terms depend on contracts provided by the operator.",
+             "• Monetary value, waiting period and policy terms depend on contracts provided by the operator. "
+             "Market valuation uses day-ahead prices; actual revenue may differ (balancing, marketing fees).",
              size=8.5)
 
     # ------------------------------------------------ page 4: audit appendix
@@ -482,16 +604,27 @@ def build_claim_package(result: AssessmentResult, info: ClaimInfo, out_dir: str 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     report_name, data_name = f"{stem}_energy_loss_report.pdf", f"{stem}_outage_timeseries.csv"
-    email = build_email(result, info, report_filename=report_name, data_filename=data_name)
+    valuation = compute_valuation(result, info)          # one price download per package
+    email = build_email(result, info, report_filename=report_name, data_filename=data_name,
+                        valuation=valuation)
     files = {
         "email": out / f"{stem}_email.txt",
-        "report": build_report_pdf(result, info, out / report_name),
+        "report": build_report_pdf(result, info, out / report_name, valuation=valuation),
         "data": out / data_name,
     }
     files["email"].write_text(email["full"], encoding="utf-8")
     export_timeseries(result).to_csv(files["data"], index=False)
+    parts = ["email", "report", "data"]
+    avail = {k: x for k, x in valuation.items() if x is not None}
+    if avail:
+        base = next(iter(avail.values())).series[["timestamp", "lost_mwh", "price_eur_per_mwh", "provisional"]].copy()
+        for k, x in avail.items():
+            base[f"value_eur_{k}"] = x.series["value_eur"].to_numpy()
+        files["valuation"] = out / f"{stem}_valuation.csv"
+        base.round(4).to_csv(files["valuation"], index=False)
+        parts.append("valuation")
     files["zip"] = out / f"{stem}_package.zip"
     with zipfile.ZipFile(files["zip"], "w", zipfile.ZIP_DEFLATED) as z:
-        for k in ("email", "report", "data"):
+        for k in parts:
             z.write(files[k], files[k].name)
-    return {**files, "email_subject": email["subject"], "email_body": email["body"]}
+    return {**files, "email_subject": email["subject"], "email_body": email["body"], "valuation_obj": valuation}

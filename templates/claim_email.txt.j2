@@ -18,10 +18,9 @@ Because the turbines' own wind measurements are unavailable for this period, we 
 {% for t in turbines %}    {{ t.name }}: {{ t.p50 }} MWh (range {{ t.p10 }} – {{ t.p90 }} MWh)
 {% endfor %}{% if waiting_period_h is not none %}
 Energy lost beyond the {{ waiting_period_h }}-hour waiting period: {{ e_after_wp }} MWh (P50).
-{% endif %}{% if price %}
-Valued at {{ price }} EUR/MWh{% if price_basis %} ({{ price_basis }}){% endif %}, this corresponds to approximately EUR {{ value_p50 }} (range EUR {{ value_p10 }} – {{ value_p90 }}){% if waiting_period_h is not none %}, or EUR {{ value_after_wp }} after the waiting period{% endif %}.
-{% else %}
-[Valuation: please insert the applicable remuneration in EUR/MWh and its basis, e.g. EEG value or PPA price.]
+{% endif %}
+{% if valuation_text %}{{ valuation_text }}
+{% else %}[Valuation: {{ valuation_missing }}]
 {% endif %}
 METHOD AND ACCURACY
 {{ method_summary }}

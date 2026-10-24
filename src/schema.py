@@ -79,6 +79,15 @@ class ClaimInfo:
         "fault preventing feed-in. The root cause is under investigation."
     )
     repair_status: str = ""
-    price_eur_per_mwh: Optional[float] = None   # remuneration to value the loss
-    price_basis: str = ""                       # e.g. "EEG anzulegender Wert", "PPA"
+    # Valuation. All three models are always calculated and shown side by side;
+    # valuation_mode picks the headline one ("market" | "eeg" | "ppa", default "market").
+    #   market: day-ahead price per interval (negative -> 0)
+    #   eeg:    day-ahead price + max(0, reference value - monthly wind market value), 0 if negative (§51 EEG)
+    #   ppa:    fixed PPA price
+    # Leave the prices empty to use the documented market benchmarks (src/pricing.py).
+    valuation_mode: Optional[str] = None
+    eeg_reference_value: Optional[float] = None  # EUR/MWh, the plant's "anzulegender Wert"
+    ppa_price: Optional[float] = None            # EUR/MWh
+    price_eur_per_mwh: Optional[float] = None    # legacy: price for the headline mode
+    price_basis: str = ""                        # free-text note shown with the headline value
     waiting_period_h: Optional[float] = None    # time deductible under the policy
