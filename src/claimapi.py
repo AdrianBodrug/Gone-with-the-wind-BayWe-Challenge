@@ -142,6 +142,8 @@ def claim(payload, store) -> dict:
             vals[k] = {"label": v.label, "eur": {q: round(x) for q, x in v.eur.items()},
                        "eur_per_mwh": round(v.avg_value_eur_per_mwh, 2),
                        "unit_price": v.unit_price, "default_price": v.unit_price_source not in ("", "operator"),
+                       "premium_eur_per_mwh": round(v.premium_eur / v.energy_mwh, 2) if (k == "eeg" and v.energy_mwh) else None,
+                       "market_value": next((val for val, _ in v.market_values.values()), None) if k == "eeg" else None,
                        "provisional_share": round(v.share_provisional, 3),
                        "after_waiting_eur": None if v.eur_after_waiting is None else round(v.eur_after_waiting)}
     farm = result.farm_energy_kwh()

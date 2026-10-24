@@ -145,8 +145,9 @@ def build_context(result: AssessmentResult, info: ClaimInfo,
         x = vals.get(k)
         if x is None:
             continue
+        prem = (x.premium_eur / x.energy_mwh) if x.energy_mwh else 0.0
         name = ("Day-ahead market price" if k == "market" else
-                f"EEG market premium (reference value {x.unit_price:,.2f} EUR/MWh)" if k == "eeg" else
+                f"EEG (market price + {prem:,.2f} EUR/MWh premium)" if k == "eeg" else
                 f"PPA, fixed price ({x.unit_price:,.2f} EUR/MWh)")
         lines.append(dict(key=k, name=name, short=MODE_LABELS[k], p50=_eur(x.eur["p50"]), p10=_eur(x.eur["p10"]),
                           p90=_eur(x.eur["p90"]), per_mwh=f"{x.avg_value_eur_per_mwh:,.2f}",
@@ -172,10 +173,10 @@ def _valuation_notes(vals: dict) -> list[str]:
     m, e, p = vals.get("market"), vals.get("eeg"), vals.get("ppa")
     if e is not None:
         mv = "; ".join(f"{k}: {val:,.2f} EUR/MWh" for k, (val, _) in e.market_values.items())
-        notes.append("EEG: market price plus a premium of max(0, reference value − monthly market value of "
-                     f"onshore wind{' (' + mv + ')' if mv else ''}); "
-                     + ("no premium was due in this period, so EEG equals the market value."
-                        if e.premium_eur < 0.5 else f"premium share EUR {_eur(e.premium_eur)}."))
+        notes.append(f"EEG: market price plus a premium of max(0, reference value {e.unit_price:,.2f} EUR/MWh − "
+                     f"monthly market value of onshore wind{' (' + mv + ')' if mv else ''}); "
+                     + ("the market value was above the reference value, so no premium was due and EEG equals "
+                        "the market value." if e.premium_eur < 0.5 else f"premium paid: EUR {_eur(e.premium_eur)}."))
     defaults = [f"{('EEG reference value' if k == 'eeg' else 'PPA price')} {x.unit_price:,.2f} EUR/MWh"
                 for k, x in (("eeg", e), ("ppa", p)) if x is not None and x.unit_price_source not in ("", "operator")]
     if defaults:
@@ -441,7 +442,8 @@ def _valuation_section(pdf, v: Valuation, ctx):
             basis = "day-ahead price per interval"
         elif k == "eeg":
             mv = ", ".join(f"{val:,.1f}" for val, _ in x.market_values.values())
-            basis = f"ref. value {x.unit_price:,.2f} vs market value {mv}"
+            prem = (x.premium_eur / x.energy_mwh) if x.energy_mwh else 0.0
+            basis = f"market + {prem:,.2f} premium (ref. {x.unit_price:,.2f} vs MV {mv})"
         else:
             basis = f"fixed {x.unit_price:,.2f} EUR/MWh"
         rows.append([MODE_LABEL_SHORT[k], basis, _eur(x.eur["p50"]),

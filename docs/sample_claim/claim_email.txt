@@ -18,11 +18,11 @@ Because the turbines' own wind measurements are unavailable for this period, we 
 VALUE OF THE LOST ENERGY
 Depending on how the wind farm's electricity is remunerated, the lost revenue is approximately:
 
-  Day-ahead market price:                             EUR 41,539  (range EUR 36,418 – 47,474)
-  EEG market premium (reference value 73.30 EUR/MWh): EUR 41,539  (range EUR 36,418 – 47,474)
-  PPA, fixed price (73.13 EUR/MWh):                   EUR 22,745  (range EUR 19,942 – 25,995)
+  Day-ahead market price:                    EUR 41,539  (range EUR 36,418 – 47,474)
+  EEG (market price + 0.00 EUR/MWh premium): EUR 41,539  (range EUR 36,418 – 47,474)
+  PPA, fixed price (73.13 EUR/MWh):          EUR 22,745  (range EUR 19,942 – 25,995)
 
-- EEG: market price plus a premium of max(0, reference value − monthly market value of onshore wind (2026-09: 109.40 EUR/MWh)); no premium was due in this period, so EEG equals the market value.
+- EEG: market price plus a premium of max(0, reference value 73.30 EUR/MWh − monthly market value of onshore wind (2026-09: 109.40 EUR/MWh)); the market value was above the reference value, so no premium was due and EEG equals the market value.
 - Market benchmarks used where the contract price was not provided: EEG reference value 73.30 EUR/MWh, PPA price 73.13 EUR/MWh – to be replaced by the actual contract values.
 
 METHOD AND ACCURACY
