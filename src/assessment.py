@@ -29,6 +29,7 @@ EXTRA_LABELS = {
     "ref_x_hour": "time-of-day dependent slope",
     "direction": "wind direction",
     "ref_x_dir": "wind-direction dependent slope",
+    "dir_harmonics": "wind-direction correction curve (e.g. wake sectors)",
     "turbulence": "turbulence",
     "temp_change_3h": "3-hour temperature change",
 }

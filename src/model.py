@@ -16,14 +16,16 @@ from .energy import PowerCurve, energy_kwh, expected_power
 WINDOW = 13          # smoothing window in 10-min steps (130 min, centred; odd keeps it symmetric)
 MAX_LAG = 6          # search reference lags of -60..+60 min
 BLOCK_DAYS = 3       # cross-validation block length, same as the hidden test outage
-ELIM_TOL = 0.002     # backward elimination: drop a reference if CV RMSE gets no worse than +tol m/s
+MIN_WEIGHT = 0.02    # a reference is "used" if its weight (all references fitted at once, >= 0) exceeds this
 MIN_GAIN = 0.002     # forward selection: keep an extra feature group if it lowers CV RMSE by >= 0.2 %
+HARMONICS = (2, 3, 4)
 
 EXTRA_GROUPS = {
     "hour":           ["hour_sin", "hour_cos"],
     "ref_x_hour":     ["ref_x_hour_sin", "ref_x_hour_cos"],
     "direction":      ["dir_sin", "dir_cos"],
     "ref_x_dir":      ["ref_x_dir_sin", "ref_x_dir_cos"],
+    "dir_harmonics":  [f"h_{f}{k}" for k in HARMONICS for f in ("sin", "cos")],
     "turbulence":     ["turbulence"],
     "temp_change_3h": ["temp_change_3h"],
 }
@@ -33,7 +35,7 @@ EXTRA_GROUPS = {
 class LossResult:
     predictions: pd.DataFrame   # timestamp, ws_pred, ws_p10, ws_p90, power_expected
     energy_kwh: dict            # p10, p50, p90
-    metrics: dict               # ws_rmse, ws_mae, p_rmse, p_mae, energy_dev_pct, r2, ...
+    metrics: dict               # ws_rmse, ws_mae, p_rmse, p_mae, energy_dev_kwh, r2, ...
     method: dict                # references, lags, coefficients, selection history, ...
     history: pd.DataFrame = field(repr=False)   # whole period: actual, CV / fitted prediction
 
@@ -91,8 +93,12 @@ def reference_features(refs, lags, window):
                          for r, d in refs.items()})
 
 
-def extra_features(refs, ref_avg, window):
-    """Candidate extra features (see EXTRA_GROUPS), built from all references."""
+def extra_features(refs, ref_avg, window, dir_weights=None):
+    """Candidate extra features (see EXTRA_GROUPS), built from all references.
+
+    dir_weights: {ref: weight} of the used references; their weight-averaged wind direction
+    drives the direction harmonics (a smooth correction curve that can follow wake dips).
+    """
     idx = ref_avg.index
     F = pd.DataFrame(index=idx)
     hour = idx.hour + idx.minute / 60
@@ -105,7 +111,15 @@ def extra_features(refs, ref_avg, window):
     F["dir_cos"] = np.cos(rad).mean(axis=1)
     F["ref_x_dir_sin"] = ref_avg * F["dir_sin"]            # slope changes with wind direction
     F["ref_x_dir_cos"] = ref_avg * F["dir_cos"]
-    turb = pd.DataFrame({r: d["wind_speed_stddev"] for r, d in refs.items()}).mean(axis=1)
+    if dir_weights:
+        w = pd.Series(dir_weights)
+        d = np.deg2rad(pd.DataFrame({r: refs[r]["wind_direction"] for r in w.index}))
+        norm = (d.notna() * w).sum(axis=1)                  # NaN-safe weighted circular mean
+        th = np.arctan2((np.sin(d) * w).sum(axis=1) / norm, (np.cos(d) * w).sum(axis=1) / norm)
+        for k in HARMONICS:
+            F[f"h_sin{k}"] = ref_avg * np.sin(k * th)
+            F[f"h_cos{k}"] = ref_avg * np.cos(k * th)
+    turb =pd.DataFrame({r: d["wind_speed_stddev"] for r, d in refs.items()}).mean(axis=1)
     F["turbulence"] = turb.rolling(window, center=True, min_periods=1).mean()
     temp = pd.DataFrame({r: d["ambient_temperature"] for r, d in refs.items()}).mean(axis=1)
     F["temp_change_3h"] = temp.diff(18)                     # warming/cooling ~ day/night stability
@@ -134,22 +148,32 @@ def rmse(y, pred):
     return float(np.sqrt(((pred[ev] - y[ev]) ** 2).mean()))
 
 
-def backward_eliminate(F, candidates, y, block_id, tol=ELIM_TOL):
-    """Drop references one at a time while CV RMSE gets no worse than +tol m/s."""
-    current = list(candidates)
-    score = lambda cols: rmse(y, cv_predict(F, cols, y, block_id, cols))
-    best = score(current)
-    history = [{"step": "start", "refs": [c[3:] for c in current], "cv_rmse": best}]
-    while len(current) > 1:
-        trials = {c: score([m for m in current if m != c]) for c in current}
-        drop = min(trials, key=trials.get)
-        if trials[drop] > best + tol:
-            break
-        current.remove(drop)
-        best = min(best, trials[drop])
-        history.append({"step": f"removed {drop[3:]}", "refs": [c[3:] for c in current],
-                        "cv_rmse": trials[drop]})
-    return current, history
+def select_references(R, y, train, block_id, min_weight=MIN_WEIGHT):
+    """Fit all candidate references at once (weights >= 0) and keep those with weight > min_weight.
+
+    A reference that adds nothing beyond the others gets weight 0, so the fit does the selection.
+    stability_pct: share of the leave-one-block-out refits in which it keeps weight > min_weight.
+    References with too little data overlapping the target's training rows are left out.
+    """
+    cand = [c for c in R.columns if R.loc[train, c].notna().mean() >= 0.5]
+    if not cand:
+        raise ValueError("No reference turbine has enough data overlapping the target.")
+    rows = (train & R[cand].notna().all(axis=1)).to_numpy()
+    X, yv, bid = R[cand].to_numpy(float), y.to_numpy(float), block_id.to_numpy()
+    full = BoundedLinear(cand).fit(X[rows], yv[rows], cand).coef_
+    folds = np.array([BoundedLinear(cand).fit(X[rows & (bid != b)], yv[rows & (bid != b)], cand).coef_
+                      for b in np.unique(bid[bid >= 0])])
+    used = [c for c, w in zip(cand, full) if w > min_weight] or [cand[int(np.argmax(full))]]
+    total = full.sum() or 1.0
+    table = [{"ref": c[3:], "weight": float(w), "weight_min": float(folds[:, i].min()),
+              "weight_max": float(folds[:, i].max()),
+              "stability_pct": float((folds[:, i] > min_weight).mean() * 100),
+              "share_pct": float(w / total * 100), "used": c in used}
+             for i, (c, w) in enumerate(zip(cand, full))]
+    table += [{"ref": c[3:], "weight": 0.0, "weight_min": 0.0, "weight_max": 0.0, "stability_pct": 0.0,
+               "share_pct": 0.0, "used": False, "note": "too little overlapping data"}
+              for c in R.columns if c not in cand]
+    return used, sorted(table, key=lambda r: -r["weight"])
 
 
 def forward_select(F, ref_cols, groups, y, block_id, min_gain=MIN_GAIN):
@@ -182,8 +206,9 @@ def _metrics(y, ws_pred, p_pred, pc):
         "ws_mae": float(np.abs(yp - yt).mean()),
         "p_rmse": float(np.sqrt(((pp - pt) ** 2).mean())),
         "p_mae": float(np.abs(pp - pt).mean()),
+        "energy_dev_kwh": energy_kwh(pp) - e_true,
+        "energy_dev_kwh_point": energy_kwh(pc.power(yp)) - e_true,
         "energy_dev_pct": float((energy_kwh(pp) - e_true) / e_true * 100),
-        "energy_dev_pct_point": float((energy_kwh(pc.power(yp)) - e_true) / e_true * 100),
         "r2": float(1 - ((yp - yt) ** 2).sum() / ((yt - yt.mean()) ** 2).sum()),
         "n_eval": int(ev.sum()),
     }
@@ -217,7 +242,8 @@ def estimate_loss(target, references, power_curve, outage, *,
     references:  {name: DataFrame} of turbines outside the target park
     power_curve: DataFrame with columns wind_speed, power (kW)
     outage:      (start, end), both inclusive
-    references_to_use: skip automatic reference selection and use these names
+    references_to_use: restrict the candidate pool to these names (default: all references);
+                       the weights >= 0 fit still decides which of them are used
     select_extras: run forward selection of extra features (False = references only)
     """
     pc = PowerCurve(power_curve)
@@ -241,19 +267,21 @@ def estimate_loss(target, references, power_curve, outage, *,
         lags[r], corrs[r] = find_lag(y, d["wind_speed"], train)
     R = reference_features(refs, lags, window)
 
-    # 2. which references to use
-    if references_to_use:
-        unknown = set(references_to_use) - set(refs)
-        if unknown:
-            raise ValueError(f"Unknown references {sorted(unknown)}; available: {list(refs)}")
-        ref_cols, elim_hist = [f"ws_{r}" for r in references_to_use], []
-    else:
-        ref_cols, elim_hist = backward_eliminate(R, list(R.columns), y, block_id)
+    # 2. which references to use: all candidates (or the user's pool) fitted at once, weights >= 0
+    pool = list(references_to_use or refs)
+    unknown = set(pool) - set(refs)
+    if unknown:
+        raise ValueError(f"Unknown references {sorted(unknown)}; available: {list(refs)}")
+    ref_cols, ref_table = select_references(R[[f"ws_{r}" for r in pool]], y, train, block_id)
+    for row in ref_table:
+        row["lag_min"], row["corr"] = lags[row["ref"]] * 10, round(corrs[row["ref"]], 4)
+    weights = {row["ref"]: row["weight"] for row in ref_table if row["used"]}
 
     # 3. extra features
-    F = pd.concat([R, extra_features(refs, R[ref_cols].mean(axis=1), window)], axis=1)
+    F = pd.concat([R, extra_features(refs, R[ref_cols].mean(axis=1), window, weights)], axis=1)
     groups = {g: c for g, c in EXTRA_GROUPS.items()
-              if F.loc[train, c].notna().all(axis=1).mean() > 0.5}   # e.g. no stddev in O park
+              if set(c) <= set(F.columns)
+              and F.loc[train, c].notna().all(axis=1).mean() > 0.5}   # e.g. no stddev in O park
     if select_extras:
         cols, added, fwd_hist = forward_select(F, ref_cols, groups, y, block_id)
     else:
@@ -321,7 +349,8 @@ def estimate_loss(target, references, power_curve, outage, *,
         "n_missing_steps": int(ws_out.isna().sum()),
         "residual_p10_p90": [_py(q10), _py(q90)],
         "block_energy_error_p10_p90_pct": [_py(e_lo * 100), _py(e_hi * 100)],
-        "reference_selection": elim_hist,
+        "reference_selection": ref_table,
+        "reference_table": ref_table,
         "feature_selection": fwd_hist,
     }
     return LossResult(predictions, {k: _py(v) for k, v in energy.items()}, metrics, method, history)

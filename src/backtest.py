@@ -41,7 +41,7 @@ def score_window(target, references, power_curve, window, **kwargs):
         "p_rmse": float(np.sqrt(((p_pred[ok] - p_true) ** 2).mean())),
         "energy_true_kwh": e_true,
         "energy_pred_kwh": energy_kwh(p_pred[ok]),
-        "energy_dev_pct": (energy_kwh(p_pred[ok]) - e_true) / e_true * 100,
+        "energy_dev_kwh": energy_kwh(p_pred[ok]) - e_true,
         "in_p10_p90": res.energy_kwh["p10"] <= e_true <= res.energy_kwh["p90"],
     }
 
@@ -69,7 +69,7 @@ def main():
     ap.add_argument("--no-extras", action="store_true", help="references-only model")
     ap.add_argument("--skip-shown", action="store_true", help="skip the shown-week validation")
     ap.add_argument("--refs", default="auto",
-                    help="'auto' (backward elimination), 'all', or a comma list like H1,O1")
+                    help="candidate pool: 'auto'/'all' (every reference) or a comma list like H1,O1")
     args = ap.parse_args()
     kwargs = {"select_extras": not args.no_extras}
 

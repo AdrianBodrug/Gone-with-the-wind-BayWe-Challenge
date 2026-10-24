@@ -98,7 +98,7 @@ c1.metric("Lost energy (P50)", f"{e['p50'] / 1000:,.1f} MWh",
           help=f"P10-P90: {e['p10'] / 1000:,.1f} - {e['p90'] / 1000:,.1f} MWh")
 c2.metric("P10 - P90", f"{e['p10'] / 1000:,.0f} - {e['p90'] / 1000:,.0f} MWh")
 c3.metric("Wind RMSE (CV)", f"{m['ws_rmse']:.2f} m/s", help=f"MAE {m['ws_mae']:.2f} m/s, R² {m['r2']:.2f}")
-c4.metric("Energy deviation (CV)", f"{m['energy_dev_pct']:+.1f} %",
+c4.metric("Energy deviation (CV)", f"{m['energy_dev_kwh'] / 1000:+,.1f} MWh",
           help=f"Power RMSE {m['p_rmse']:.0f} kW")
 
 st.subheader("Method")

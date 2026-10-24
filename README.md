@@ -189,8 +189,11 @@ pip install -r requirements.txt
 python -m scripts.make_claim_package                                  # demo claim package -> outputs/
 python -m scripts.make_claim_package --waiting-hours 24                      # all 3 valuations, market as headline
 python -m scripts.make_claim_package --valuation eeg --eeg 73.3 --ppa 70     # operator's own contract prices
-streamlit run app.py                                                  # GUI (coming)
+python server.py                                                      # web app -> http://localhost:8000
+python server.py --reload                                             # same, re-imports src/ on every request
 ```
+
+**Web app (`server.py` + `templates/windgap.html`).** The page runs on our Python model: `server.py` serves it with the backend engine pre-selected and answers `POST /api/analyze` through `src/webapi.py` → `estimate_loss()`. Everything is computed per request: change the target, outage window or reference pool in the page, or upload new files (e.g. `T4_data.xlsx` + `T4_power_curve.xlsx` — they are added to the current dataset), and the references, weights and results update. The page only sends wind speeds; turbines that match `data/` get their direction / temperature / turbulence channels from there. Opened without the server, the page falls back to its built-in browser engine.
 
 ## 10. Claim deliverables (B7 / B8) — `src/report.py`
 
