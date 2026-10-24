@@ -1,7 +1,7 @@
 """Generate the claim package (email draft, PDF report, CSV) from the data folder.
 
     python -m scripts.make_claim_package                 # demo values
-    python -m scripts.make_claim_package --price 73.5 --waiting-hours 24
+    python -m scripts.make_claim_package --valuation eeg --eeg 73.3 --ppa 70 --waiting-hours 24
 """
 import argparse
 import warnings
@@ -15,9 +15,10 @@ warnings.filterwarnings("ignore")
 ap = argparse.ArgumentParser()
 ap.add_argument("--data", default="data")
 ap.add_argument("--out", default="outputs")
-ap.add_argument("--valuation", choices=["market", "eeg", "fixed"], default=None,
-                help="market = live day-ahead prices; eeg/fixed need --price")
-ap.add_argument("--price", type=float, default=None, help="EUR/MWh (EEG reference value or PPA price)")
+ap.add_argument("--valuation", choices=["market", "eeg", "ppa"], default="market",
+                help="headline valuation model (all three are always shown)")
+ap.add_argument("--eeg", type=float, default=None, help="EEG reference value EUR/MWh (default: benchmark)")
+ap.add_argument("--ppa", type=float, default=None, help="PPA price EUR/MWh (default: benchmark)")
 ap.add_argument("--price-basis", default="")
 ap.add_argument("--waiting-hours", type=float, default=None, help="policy time deductible in hours")
 args = ap.parse_args()
@@ -32,7 +33,8 @@ info = ClaimInfo(
     contact_email="operations@example.com",
     turbine_model="4.5 MW class",
     valuation_mode=args.valuation,
-    price_eur_per_mwh=args.price,
+    eeg_reference_value=args.eeg,
+    ppa_price=args.ppa,
     price_basis=args.price_basis,
     waiting_period_h=args.waiting_hours,
 )

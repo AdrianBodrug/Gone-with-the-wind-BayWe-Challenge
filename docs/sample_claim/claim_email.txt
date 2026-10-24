@@ -20,7 +20,7 @@ Because the turbines' own wind measurements are unavailable for this period, we 
 
 Energy lost beyond the 24-hour waiting period: 188.1 MWh (P50).
 
-Valued at the German day-ahead market price (EPEX Spot, DE-LU) for each interval of the outage, the lost energy corresponds to approximately EUR 41,702 (range EUR 36,161 – 48,203), i.e. an average of 133.92 EUR per lost MWh. Beyond the waiting period: EUR 24,985 (P50).
+Valued at the German day-ahead market price (EPEX Spot, DE-LU) for each interval of the outage, the lost energy corresponds to approximately EUR 41,702 (range EUR 36,161 – 48,203), i.e. an average of 133.92 EUR per lost MWh. Beyond the waiting period: EUR 24,985 (P50). For comparison, the other remuneration models give: EEG market premium EUR 41,702; PPA (fixed price) EUR 22,772.
 
 METHOD AND ACCURACY
 For each affected turbine, the wind speed during the outage was reconstructed as a weighted sum of wind speeds measured at reference turbines in other wind farms (H1, H2, H3, H4, H5, O1, O2). Each reference is first shifted by the time delay that best matches the target turbine and smoothed over 130 minutes; all weights are forced to be non-negative. References and extra terms (wind-direction dependent slope, 3-hour temperature change, turbulence) were kept only where they improved accuracy in cross-validation over 3-day blocks of history. Lost energy is the turbine power curve averaged over the model's historical error distribution.
