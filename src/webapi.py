@@ -32,7 +32,9 @@ CACHE_SIZE = 16
 FEATURE_LABELS = {
     "hour": "Tageszeit", "ref_x_hour": "Tageszeit × Wind", "direction": "Windrichtung",
     "ref_x_dir": "Windrichtung × Wind", "dir_harmonics": "Richtungskurve (Nachlauf)",
-    "turbulence": "Turbulenz", "temp_change_3h": "Temperaturänderung 3 h",
+    "turbulence": "Turbulenz", "temp_change_3h": "Temperaturänderung 3 h", "temperature": "Temperatur",
+    "temp_anomaly": "Temperatur vs. Tagesmittel", "pressure": "Luftdruck", "pressure_change_3h": "Luftdruckänderung 3 h",
+    "air_density": "Luftdichte", "turb_intensity": "Turbulenzintensität",
 }
 
 _cache = OrderedDict()
@@ -121,11 +123,11 @@ def _scores(pred_ws, power_kw, truth, pc):
     if not ok.any():
         return None
     t, p, pw = truth[ok], pred_ws[ok], power_kw[ok]
-    pt = pc.power(t)
+    pt, pp = pc.power(t), pc.power(p)
     e_pred, e_act = energy_kwh(pw), energy_kwh(pt)
     return {"n": int(ok.sum()), "wind_rmse": float(np.sqrt(((p - t) ** 2).mean())),
-            "wind_mae": float(np.abs(p - t).mean()), "power_rmse": float(np.sqrt(((pw - pt) ** 2).mean())),
-            "power_mae": float(np.abs(pw - pt).mean()), "energy_pred_kwh": e_pred, "energy_act_kwh": e_act,
+            "wind_mae": float(np.abs(p - t).mean()), "power_rmse": float(np.sqrt(((pp - pt) ** 2).mean())),
+            "power_mae": float(np.abs(pp - pt).mean()), "energy_pred_kwh": e_pred, "energy_act_kwh": e_act,
             "energy_dev_kwh": e_pred - e_act, "energy_dev_pct": (e_pred - e_act) / e_act * 100 if e_act else None}
 
 
@@ -137,12 +139,19 @@ def _equation(method):
     return f"{method['intercept']:.2f} + " + " + ".join(terms) + (" + Korrekturen: " + ", ".join(extras) if extras else "")
 
 
-def analyze(payload, store):
-    """Run estimate_loss() for one page request and return the page's response dict."""
-    key = hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()
-    if key in _cache:
-        _cache.move_to_end(key)
-        return _cache[key]
+_runs = OrderedDict()
+
+
+def run_turbine(payload, store):
+    """estimate_loss() for one target turbine, cached on the inputs that matter (shared by analyze/export).
+
+    Returns {target, res, frame, window, pc, shift}; window = the 10-min steps of the outage (end exclusive).
+    """
+    keep = {k: payload.get(k) for k in ("target", "window", "reference", "power_curve", "data")}
+    key = hashlib.sha1(json.dumps(keep, sort_keys=True).encode()).hexdigest()
+    if key in _runs:
+        _runs.move_to_end(key)
+        return _runs[key]
 
     target = payload["target"]
     frames, shift, step = _frames(payload, store)
@@ -166,6 +175,23 @@ def analyze(payload, store):
     pc = PowerCurve(pc_df)
 
     res = estimate_loss(frames[target], refs, pc_df, (window[0], window[-1]), references_to_use=pool)
+    run = {"target": target, "res": res, "frame": frames[target], "window": window, "pc": pc, "shift": shift}
+    _runs[key] = run
+    if len(_runs) > CACHE_SIZE:
+        _runs.popitem(last=False)
+    return run
+
+
+def analyze(payload, store):
+    """Run estimate_loss() for one page request and return the page's response dict."""
+    key = hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    if key in _cache:
+        _cache.move_to_end(key)
+        return _cache[key]
+
+    run = run_turbine(payload, store)
+    target, res, window, pc, shift = run["target"], run["res"], run["window"], run["pc"], run["shift"]
+    frames = {target: run["frame"]}
     p = res.predictions.set_index("timestamp").reindex(window)
     missing = p["ws_pred"].isna()
     if missing.mean() > 0.5:      # e.g. 3-4 Aug: rows are absent in every file, references included
@@ -196,19 +222,23 @@ def analyze(payload, store):
             "r": float(np.sqrt(max(mt["r2"], 0))), "equation": _equation(m),
             "description": m["description"], "coefficients": m["coefficients"],
             "extra_features": m["extra_features"], "feature_selection": m["feature_selection"],
+            "selection_basis": m["selection_basis"],
+            "selection_path": [{**p_, "label": FEATURE_LABELS.get(p_["step"], p_["step"])} for p_ in m["selection_path"]],
             "n_train": m["n_train"], "cv_blocks": m["n_cv_blocks"], "window_min": m["window_min"],
             "time_shift_h": shift.total_seconds() / 3600,
         },
         "metrics": {
             "validation": {"n": mt["n_eval"], "wind_rmse": mt["ws_rmse"], "wind_mae": mt["ws_mae"],
                            "power_rmse": mt["p_rmse"], "power_mae": mt["p_mae"],
-                           "energy_dev_kwh": mt["energy_dev_kwh"], "energy_dev_pct": mt["energy_dev_pct"]},
+                           "energy_dev_kwh": mt["energy_dev_kwh"], "energy_dev_pct": mt["energy_dev_pct"],
+                           "energy_pred_kwh": mt["energy_pred_kwh"], "energy_act_kwh": mt["energy_true_kwh"],
+                           "basis": mt["basis"], "period": mt["basis_period"]},
             "test": test,
         },
     }
     out = _clean_json(out)
     print(f"analyze: {target}, {len(window)} steps, {len(m['references'])} references, "
-          f"{m['n_train']} training rows, {m['n_cv_blocks']} CV blocks, {mt['n_eval']} validation rows, {out['filled_steps']} filled steps") 
+          f"{m['n_train']} training rows, selection on {mt['basis_period']} ({mt['n_eval']} rows), {out['filled_steps']} filled steps") 
     print(f"Model: {m['description']}, slope {out['model']['slope']:.2f}, r {out['model']['r']:.2f}, "
           f"features {', '.join(m['extra_features']) if m['extra_features'] else 'none'}, equation: {out['model']['equation']}")
     print("================================================================")
