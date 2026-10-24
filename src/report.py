@@ -61,6 +61,30 @@ def _energy_after_waiting_period(result: AssessmentResult, hours: float) -> floa
                      for t in result.turbines))
 
 
+def _fmt(x, f):
+    return "–" if x is None or (isinstance(x, float) and np.isnan(x)) else f.format(x)
+
+
+EXTRA_SHORT = {"turbulence": "turbulence", "temp_change_3h": "temp. change 3 h", "dir_sin": "dir. sin",
+               "dir_cos": "dir. cos", "hour_sin": "hour sin", "hour_cos": "hour cos",
+               "ref_x_dir_sin": "wind×dir sin", "ref_x_dir_cos": "wind×dir cos",
+               "ref_x_hour_sin": "wind×hour sin", "ref_x_hour_cos": "wind×hour cos"}
+
+
+def _extras_text(ex: dict, max_len: int = 62) -> str:
+    """Compact extra-term list for the appendix table (direction harmonics grouped)."""
+    if not ex:
+        return "none"
+    parts, n_h = [], sum(1 for k in ex if k.startswith("h_"))
+    for k, v in ex.items():
+        if not k.startswith("h_"):
+            parts.append(f"{EXTRA_SHORT.get(k, k)} {v:+.2f}")
+    if n_h:
+        parts.append(f"direction curve ({n_h} terms)")
+    txt = ", ".join(parts)
+    return txt if len(txt) <= max_len else txt[: max_len - 1] + "…"
+
+
 def _mean_metric(result, key):
     return float(np.mean([t.metrics[key] for t in result.turbines]))
 
@@ -529,13 +553,14 @@ def build_report_pdf(result: AssessmentResult, info: ClaimInfo, path: str | Path
              "accuracy on held-out history, so the model stays as simple as the data allows.")
     acc = [[t.turbine, f"{t.metrics['bt_ws_rmse']:.2f}", f"{t.metrics['bt_ws_mae']:.2f}",
             f"{t.metrics['bt_p_rmse']:,.0f}", f"{t.metrics['bt_abs_energy_err_pct']:.1f}",
-            f"{t.metrics['val_ws_rmse']:.2f}", f"{t.metrics['val_energy_dev_pct']:+.1f}"] for t in result.turbines]
+            _fmt(t.metrics.get('val_ws_rmse'), "{:.2f}"), _fmt(t.metrics.get('val_energy_dev_pct'), "{:+.1f}")]
+           for t in result.turbines]
     pdf.grid_table(["Turbine", "Wind RMSE", "Wind MAE", "Power RMSE", "|Energy err.| %",
                     "Val. wind RMSE", "Val. energy %"], acc, [22, 24, 22, 26, 28, 28, 28], size=8)
     n_win = ctx["n_windows"]
     pdf.caption(f"First four columns: cross-validation over {n_win} historical 3-day blocks (model refitted "
                 "without each block, then scored on it). 'Val.' columns: the 4–9 Sep validation week, held out "
-                "entirely. Wind in m/s, power in kW, energy error = deviation of summed energy.")
+                "entirely ('–' = not available for this data). Wind in m/s, power in kW, energy error = deviation of summed energy.")
     vb = chart_validation(result)
     if vb:
         pdf.image_buf(vb)
@@ -585,7 +610,7 @@ def build_report_pdf(result: AssessmentResult, info: ClaimInfo, path: str | Path
     xrows = []
     for t in result.turbines:
         ex = t.method.get("extra_coefficients", {})
-        xrows.append([t.turbine, ", ".join(f"{k} {v:+.2f}" for k, v in ex.items()) or "none",
+        xrows.append([t.turbine, _extras_text(ex),
                       f"{t.method.get('intercept', float('nan')):.2f}", f"{t.metrics.get('r2', float('nan')):.2f}",
                       f"{t.method.get('n_train_rows', '')}"])
     pdf.grid_table(["Turbine", "Extra terms (coefficient)", "Intercept m/s", "CV R²", "Train rows"],

@@ -87,7 +87,7 @@ def _validation(target, references, power_curve, window, **kwargs):
 def run_assessment(data_dir="data", targets=None, outage=None, target_park="T",
                    include_validation=True, validation_window=SHOWN_WEEK,
                    **model_kwargs) -> AssessmentResult:
-    """Run the model on every target turbine and return an AssessmentResult.
+    """Run the model on every target turbine of the data folder and return an AssessmentResult.
 
     outage: (start, end) inclusive; default = longest gap detected per target
     model_kwargs: passed to estimate_loss (references_to_use, select_extras, window)
@@ -97,10 +97,31 @@ def run_assessment(data_dir="data", targets=None, outage=None, target_park="T",
     targets = list(targets or sorted(tgt_all))
     files = sorted(Path(data_dir).glob("*_data.*")) + sorted(Path(data_dir).glob("*_power_curve.*"))
     hashes = {f.name: _sha256(f) for f in files if not f.name.startswith("~$")}
+    return assess({t: tgt_all[t] for t in targets}, refs, curves, outage, hashes,
+                  include_validation=include_validation, validation_window=validation_window,
+                  **model_kwargs)
 
+
+def _validation_possible(d, outage, window) -> bool:
+    """Shown-week validation only if it lies in the data, does not touch the outage and the
+    target has measurements there (uploaded data may cover other dates)."""
+    v0, v1 = (pd.Timestamp(x) for x in window)
+    if outage is not None and not (pd.Timestamp(outage[1]) < v0 or pd.Timestamp(outage[0]) > v1):
+        return False
+    ws = d["wind_speed"] if "wind_speed" in d else d.iloc[:, 0]
+    sub = ws[(ws.index >= v0) & (ws.index <= v1)]
+    return len(sub) > 144 and sub.notna().mean() > 0.5
+
+
+def assess(targets: dict, refs: dict, curves: dict, outage=None, input_files=None,
+           include_validation=True, validation_window=SHOWN_WEEK, **model_kwargs) -> AssessmentResult:
+    """Core: estimate_loss() for each {name: frame} in `targets` against `refs` -> AssessmentResult.
+
+    Used by run_assessment (data folder) and by the web claim endpoint (data sent by the page).
+    """
     results, used_refs, starts, ends = [], set(), [], []
-    for t in targets:
-        d, pc_df = tgt_all[t], curves[t]
+    for t, d in targets.items():
+        pc_df = curves[t]
         o = outage or detect_outages(d, refs)[0]
         res = estimate_loss(d, refs, pc_df, o, **model_kwargs)
         pc = PowerCurve(pc_df)
@@ -123,9 +144,12 @@ def run_assessment(data_dir="data", targets=None, outage=None, target_park="T",
             "r2": res.metrics["r2"],
         }
         validation = None
-        if include_validation:
-            vs, validation = _validation(d, refs, pc_df, validation_window, **model_kwargs)
-            metrics.update(vs)
+        if include_validation and _validation_possible(d, o, validation_window):
+            try:
+                vs, validation = _validation(d, refs, pc_df, validation_window, **model_kwargs)
+                metrics.update(vs)
+            except Exception:            # validation is a bonus - never block the claim
+                validation = None
 
         h = res.history
         o0, o1 = pd.Timestamp(o[0]), pd.Timestamp(o[1])
@@ -166,8 +190,9 @@ def run_assessment(data_dir="data", targets=None, outage=None, target_park="T",
           "history. Lost energy is the turbine power curve averaged over the model's historical "
           "error distribution."
     )
+    first = next(iter(targets))
     return AssessmentResult(
         turbines=results, outage_start=min(starts), outage_end=max(ends),
-        power_curve=curves[targets[0]], references=sorted(used_refs), input_files=hashes,
+        power_curve=curves[first], references=sorted(used_refs), input_files=input_files or {},
         model_name=MODEL_NAME, model_version=_model_version(), method_summary=summary,
     )

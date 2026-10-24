@@ -7,6 +7,8 @@
 GET  /             the page, switched to the backend engine
 GET  /health       status + turbines the server has on disk
 POST /api/analyze  page request -> estimate_loss() -> page response (see src/webapi.py)
+POST /api/claim    analysis request + claim form -> email draft, PDF report, CSVs (see src/claimapi.py)
+GET  /api/claim/<id>/<file>   download a generated file
 """
 import argparse
 import importlib
@@ -15,9 +17,13 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import src.assessment
+import src.claimapi
 import src.data_io
 import src.energy
 import src.model
+import src.pricing
+import src.report
 import src.webapi
 
 ROOT = Path(__file__).resolve().parent
@@ -50,6 +56,19 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             html = PAGE.read_text(encoding="utf-8").replace("</head>", BACKEND_JS + "</head>", 1)
             self._send(200, html, "text/html; charset=utf-8")
+        elif path.startswith("/api/claim/"):
+            parts = path.split("/")
+            got = src.claimapi.claim_file(parts[3], parts[4]) if len(parts) == 5 else None
+            if got is None:
+                return self._send(404, json.dumps({"error": "not found"}))
+            data, ctype = got
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Content-Disposition", f'attachment; filename="{parts[4]}"')
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(data)
         elif path == "/health":
             self._send(200, json.dumps({"status": "ok", "turbines": sorted(self.store.turbines),
                                         "power_curves": sorted(self.store.curves)}))
@@ -57,14 +76,19 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, json.dumps({"error": "not found"}))
 
     def do_POST(self):
-        if self.path.split("?")[0] != "/api/analyze":
+        route = self.path.split("?")[0]
+        if route not in ("/api/analyze", "/api/claim"):
             return self._send(404, json.dumps({"error": "not found"}))
         try:
             payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
             if self.reload:
-                for mod in (src.data_io, src.energy, src.model, src.webapi):
+                for mod in (src.data_io, src.energy, src.model, src.webapi,
+                            src.pricing, src.report, src.assessment, src.claimapi):
                     importlib.reload(mod)
-            result = src.webapi.analyze(payload, self.store)
+            if route == "/api/claim":
+                result = src.claimapi.claim(payload, self.store)
+            else:
+                result = src.webapi.analyze(payload, self.store)
             self._send(200, json.dumps(result))
         except ValueError as e:            # expected: bad window, no reference data, ...
             self._send(400, json.dumps({"error": str(e)}))
@@ -82,12 +106,14 @@ def main():
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--data", default=str(ROOT / "data"))
     ap.add_argument("--reload", action="store_true")
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="127.0.0.1 = this computer only; 0.0.0.0 = reachable from the network / cloud hosting")
     args = ap.parse_args()
     Handler.store = src.webapi.Store(args.data)
     Handler.reload = args.reload
     print(f"Loaded {len(Handler.store.turbines)} turbines from {args.data}")
-    print(f"WindGap running on http://localhost:{args.port}")
-    ThreadingHTTPServer(("", args.port), Handler).serve_forever()
+    print(f"WindGap running on http://localhost:{args.port}  (listening on {args.host})")
+    ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()
 
 
 if __name__ == "__main__":
