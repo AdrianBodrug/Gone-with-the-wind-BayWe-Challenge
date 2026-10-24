@@ -1,0 +1,43 @@
+Subject: Business interruption notification – Wind Farm T (demo) – outage 01.09.2026 to 03.09.2026
+
+Dear Demo Insurance AG claims team,
+
+We are writing to notify you of a business interruption at Wind Farm T (demo), insured under policy DEMO-0000-00.
+
+WHAT HAPPENED
+On 01 September 2026 at 00:00, the communication connection to the wind farm was lost and remained unavailable until 04 September 2026 at 00:00 (local time, Europe/Berlin), a duration of 72 hours. A production stop is suspected; possible causes include cable damage between the wind farm and the grid connection point or a technical fault preventing feed-in. The root cause is under investigation.
+
+Affected turbines: T1, T2, T3 (4.5 MW class).
+
+ESTIMATED ENERGY YIELD LOSS
+Because the turbines' own wind measurements are unavailable for this period, we reconstructed the wind conditions from reference wind farms nearby and applied the turbines' power curves.
+
+  Estimated lost energy (best estimate, P50):  311.4 MWh
+  Likely range (P10 – P90):                    270.0 – 359.9 MWh
+    T1: 89.1 MWh (range 74.6 – 104.8 MWh)
+    T2: 123.6 MWh (range 111.7 – 144.7 MWh)
+    T3: 98.6 MWh (range 83.7 – 110.4 MWh)
+
+Energy lost beyond the 24-hour waiting period: 188.1 MWh (P50).
+
+Valued at 73.50 EUR/MWh (demo value), this corresponds to approximately EUR 22,887 (range EUR 19,846 – 26,455), or EUR 13,829 after the waiting period.
+
+METHOD AND ACCURACY
+For each affected turbine, the wind speed during the outage was reconstructed as a weighted sum of wind speeds measured at reference turbines in other wind farms (H1, H2, H3, H4, H5, O1, O2). Each reference is first shifted by the time delay that best matches the target turbine and smoothed over 130 minutes; all weights are forced to be non-negative. References and extra terms (wind-direction dependent slope, 3-hour temperature change, turbulence) were kept only where they improved accuracy in cross-validation over 3-day blocks of history. Lost energy is the turbine power curve averaged over the model's historical error distribution.
+On historical periods where actual measurements are known, the method reconstructed wind speed with a typical error of 1.13 m/s (RMSE, cross-validated on 29 historical 3-day blocks) and the energy over a 3-day window with a typical deviation of ±10%. Full details, charts and the input-data fingerprints are in the attached report.
+
+PLEASE NOTE
+This is an estimate based on reference data. Since the outage concerned the communication connection, we will provide the grid operator's metering data for the period to confirm that no energy was fed into the grid. We will update this notification if the final figures differ.
+
+ATTACHMENTS
+  1. claim_energy_loss_report.pdf – energy loss assessment report
+  2. claim_outage_timeseries.csv – reconstructed 10-minute time series for the outage period
+
+Please let us know if you need further information or would like to arrange a call.
+
+Kind regards,
+
+Asset Operations Team
+Demo Operator GmbH
+operations@example.com
+
