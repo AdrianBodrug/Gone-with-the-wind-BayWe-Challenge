@@ -65,8 +65,8 @@ def _fmt(x, f):
     return "–" if x is None or (isinstance(x, float) and np.isnan(x)) else f.format(x)
 
 
-EXTRA_SHORT = {"turbulence": "turbulence", "temp_change_3h": "temp. change 3 h", "dir_sin": "dir. sin",
-               "dir_cos": "dir. cos", "hour_sin": "hour sin", "hour_cos": "hour cos",
+EXTRA_SHORT = {"turbulence": "turb.", "temp_change_3h": "ΔT 3 h", "dir_sin": "dir sin",
+               "dir_cos": "dir cos", "hour_sin": "hour sin", "hour_cos": "hour cos",
                "ref_x_dir_sin": "wind×dir sin", "ref_x_dir_cos": "wind×dir cos",
                "ref_x_hour_sin": "wind×hour sin", "ref_x_hour_cos": "wind×hour cos"}
 
@@ -80,7 +80,7 @@ def _extras_text(ex: dict, max_len: int = 62) -> str:
         if not k.startswith("h_"):
             parts.append(f"{EXTRA_SHORT.get(k, k)} {v:+.2f}")
     if n_h:
-        parts.append(f"dir. curve ({n_h} terms)")
+        parts.append(f"dir. curve ({n_h})")
     txt = ", ".join(parts)
     return txt if len(txt) <= max_len else txt[: max_len - 1] + "…"
 
