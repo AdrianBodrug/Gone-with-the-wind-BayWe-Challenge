@@ -78,7 +78,12 @@ class BoundedLinear:
 # ---------------------------------------------------------------- building blocks
 
 def find_lag(y, x, mask, max_lag=MAX_LAG):
-    """Best shift (steps) of reference x for target y; negative = target sees the wind first."""
+    """Best shift L (steps) of reference x for target y, used as x.shift(L).
+
+    L < 0 means the model uses the reference reading from |L| steps *after* the target time
+    (the wind reaches the target first). Reported lags (lag_min, lags_min) are -L * 10: the time of the
+    reference reading relative to the target time, + = after, - = before.
+    """
     out = {}
     for L in range(-max_lag, max_lag + 1):
         pair = pd.concat([y, x.shift(L)], axis=1)[mask].dropna()
@@ -374,7 +379,9 @@ def estimate_loss(target, references, power_curve, outage, *,
 
     coef = dict(zip(cols, model.coef_))
     total_w = sum(max(coef[c], 0) for c in ref_cols) or 1.0
-    ref_table = sorted([{"ref": r, "lag_min": lags[r] * 10, "corr": round(corrs[r], 4), "used": r in chosen,
+    corr_val = {r: y[val].corr(refs[r]["wind_speed"].shift(lags[r])[val]) for r in refs}
+    ref_table = sorted([{"ref": r, "lag_min": -lags[r] * 10, "corr": round(corrs[r], 4),
+                         "corr_selection": None if pd.isna(corr_val[r]) else round(float(corr_val[r]), 4), "used": r in chosen,
                          "order": chosen.index(r) + 1 if r in chosen else None,
                          "weight": float(coef.get(f"ws_{r}", 0.0)),
                          "share_pct": float(coef.get(f"ws_{r}", 0.0) / total_w * 100),
@@ -387,7 +394,7 @@ def estimate_loss(target, references, power_curve, outage, *,
                         + f"; selected on {label}, fitted on {n_fit} 10-min steps outside the outage."),
         "references": chosen,
         "references_available": list(refs),
-        "lags_min": {r: lags[r] * 10 for r in refs},
+        "lags_min": {r: -lags[r] * 10 for r in refs},          # reference reading time vs target time (+ = after)
         "correlations": {r: round(corrs[r], 4) for r in refs},
         "extra_features": added,
         "features": cols,

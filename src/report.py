@@ -630,7 +630,8 @@ def build_report_pdf(result: AssessmentResult, info: ClaimInfo, path: str | Path
     cw = min(26, int(160 / max(len(refs), 1)))
     pdf.grid_table(["Turbine"] + refs, wrows, [18] + [cw] * len(refs), size=8)
     pdf.caption("Weight of each reference turbine's wind speed, with its time shift in minutes in brackets "
-                "(negative = the wind reaches the target turbine first). Example: 0.40 means +1 m/s at that "
+                "(the reference reading used, relative to the target time: +30 = 30 min after, i.e. the wind reaches the "
+                "target turbine first; -30 = 30 min before). Example: 0.40 means +1 m/s at that "
                 "reference adds 0.40 m/s at the target turbine. '–' = reference not used for this turbine.")
     xrows = []
     for t in result.turbines:
