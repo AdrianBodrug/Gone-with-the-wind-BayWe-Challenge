@@ -15,7 +15,9 @@ warnings.filterwarnings("ignore")
 ap = argparse.ArgumentParser()
 ap.add_argument("--data", default="data")
 ap.add_argument("--out", default="outputs")
-ap.add_argument("--price", type=float, default=None, help="EUR/MWh used to value the loss")
+ap.add_argument("--valuation", choices=["market", "eeg", "fixed"], default=None,
+                help="market = live day-ahead prices; eeg/fixed need --price")
+ap.add_argument("--price", type=float, default=None, help="EUR/MWh (EEG reference value or PPA price)")
 ap.add_argument("--price-basis", default="")
 ap.add_argument("--waiting-hours", type=float, default=None, help="policy time deductible in hours")
 args = ap.parse_args()
@@ -29,6 +31,7 @@ info = ClaimInfo(
     contact_name="Asset Operations Team",
     contact_email="operations@example.com",
     turbine_model="4.5 MW class",
+    valuation_mode=args.valuation,
     price_eur_per_mwh=args.price,
     price_basis=args.price_basis,
     waiting_period_h=args.waiting_hours,
@@ -37,5 +40,6 @@ info = ClaimInfo(
 result = run_assessment(args.data)
 files = build_claim_package(result, info, args.out)
 print("Subject:", files["email_subject"])
-for k in ("email", "report", "data", "zip"):
-    print(f"{k:>7}: {files[k]}")
+for k in ("email", "report", "data", "valuation", "zip"):
+    if k in files:
+        print(f"{k:>9}: {files[k]}")

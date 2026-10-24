@@ -79,6 +79,10 @@ class ClaimInfo:
         "fault preventing feed-in. The root cause is under investigation."
     )
     repair_status: str = ""
-    price_eur_per_mwh: Optional[float] = None   # remuneration to value the loss
+    # Valuation: "market" = live day-ahead prices for each interval of the outage,
+    # "eeg" = price_eur_per_mwh but zero in negative-price intervals (§51 EEG),
+    # "fixed" = price_eur_per_mwh (PPA). None + a price -> "fixed".
+    valuation_mode: Optional[str] = None
+    price_eur_per_mwh: Optional[float] = None   # EEG reference value or PPA price
     price_basis: str = ""                       # e.g. "EEG anzulegender Wert", "PPA"
     waiting_period_h: Optional[float] = None    # time deductible under the policy

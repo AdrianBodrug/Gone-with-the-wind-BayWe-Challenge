@@ -187,7 +187,8 @@ requirements.txt
 ```bash
 pip install -r requirements.txt
 python -m scripts.make_claim_package                                  # demo claim package -> outputs/
-python -m scripts.make_claim_package --price 73.5 --waiting-hours 24  # with valuation + deductible
+python -m scripts.make_claim_package --valuation market --waiting-hours 24   # live day-ahead prices + deductible
+python -m scripts.make_claim_package --valuation eeg --price 73.5            # EEG value, 0 in negative-price intervals
 streamlit run app.py                                                  # GUI (coming)
 ```
 
@@ -215,3 +216,18 @@ pkg = build_claim_package(result, info, "outputs")   # .txt + .pdf + .csv + .zip
 | CSV | 10-min reconstructed wind (P10/P50/P90), expected power, energy per turbine |
 
 Design rules: missing facts render as visible `[placeholders]` — the tool never invents policy numbers, prices or deductibles; the email is a draft for human review, never sent automatically. See `docs/sample_claim/` for example output.
+
+## 11. Valuation with live day-ahead prices — `src/pricing.py`
+
+The lost energy is valued **interval by interval** at the German day-ahead price (DE-LU), downloaded live for exactly the outage window from the free Energy-Charts API (Fraunhofer ISE; data Bundesnetzagentur | SMARD.de, CC BY 4.0). No API key, works for any date including outages that are still ongoing.
+
+| Mode | Value per lost MWh | Use when |
+|---|---|---|
+| `market` | day-ahead price of that interval (negative → 0, plant would curtail) | merchant / direct marketing |
+| `eeg` | EEG reference value (`--price`), but 0 in negative-price intervals (§51 EEG) | EEG market premium |
+| `fixed` | `--price` | PPA / fixed tariff |
+
+- **Not-yet-published hours** (prices for day D appear ~13:00 on D-1): valued provisionally by repeating the last published day's profile, flagged in email + PDF, and updated on re-run.
+- **Time zones**: everything is matched in UTC, so the extra hour when summer time ends (e.g. 25 Oct 2026) is counted correctly; hourly prices (before Oct 2025) and quarter-hourly prices (since) both work.
+- **Offline**: every download is cached in `data/prices/`; the hidden-window prices are committed so the demo works without internet.
+- Output: valuation paragraph in the email, section 4 + price chart in the PDF, `*_valuation.csv` with price and EUR per 10-min interval.
