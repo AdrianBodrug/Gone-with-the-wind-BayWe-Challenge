@@ -1,7 +1,10 @@
 # WindGap
 
 **How much energy did a wind farm lose while it was offline?**
-WATT THE HACK 2026 (Munich) · BayWa r.e. challenge
+
+🥈 **2nd place, BayWa r.e. challenge** · WATT THE HACK 2026, Munich
+
+## Problem statement and WindGap Solution
 
 When the communication link to a wind farm drops, the farm may stop feeding in, and its own wind measurements disappear with the link. To file a business-interruption insurance claim, the operator still has to say how much energy was lost. Today an analyst estimates it by hand from a neighbouring farm's wind data.
 
@@ -10,8 +13,8 @@ WindGap automates that estimate:
 1. It finds the outage in the data.
 2. It reconstructs the missing wind from reference wind farms that kept measuring.
 3. It turns that wind into lost energy with the turbines' power curve.
-4. It shows how far the method can be trusted.
-5. It drafts the insurance notification and a PDF report.
+4. It shows the fitted model so the results can be reproducible using the learnt linear equation for each wind turbine that faces power loss.
+5. It drafts the insurance email and a detailed PDF report.
 
 Everything runs locally in the browser.
 
@@ -245,12 +248,12 @@ The organisers' data covers 10 turbines in 3 parks: T1–T3 are the targets, H1�
 
 ## Limitations
 
-- The method assumes that the relationship between the parks during the outage is the same as in the rest of the data. Unusual weather (e.g. a storm front with an unusual track) can break that, and the P10–P90 range only reflects errors seen in the past.
+- The method assumes that the relationship between the parks during the outage is the same as in the rest of the data. Unusual weather (e.g. a storm front with an unusual track) can break that, and the P10–P90 range only reflects errors seen in the past. In addition, the project mainly aims to produce models that are **explainable** while **accurate**, and only linear regression and boosting methods are experimented, additional ML models could be incorporate to see if accuracy can be improved even further. 
 - The estimate is the energy the turbines *could* have produced. Whether they actually stopped has to be confirmed with the grid operator's metering data, and the email says so.
 - The power curve is the manufacturer curve. Availability, curtailment and icing are not modelled.
 
 ## Team
 
 - **Adrian Bodrug** ([AdrianBodrug](https://github.com/AdrianBodrug)): app design, insurance claim (email, PDF, valuation)
-- **Pengxuan (Peter) Huang** ([pengxuanHuang](https://github.com/pengxuanHuang)): model and backend
+- **Pengxuan (Peter) Huang** ([pengxuanHuang](https://github.com/PeterrHH)): model and backend
 - [weinbrennerm1-code](https://github.com/weinbrennerm1-code): WindGap frontend
