@@ -218,7 +218,8 @@ scripts/
   make_claim_package.py   email + PDF from the command line
   update_prices.py        refresh the price CSV (needs internet)
 Dockerfile                container for the app (docker build / docker run, see below)
-requirements-app.txt      packages the app needs (requirements.txt also has notebook extras)
+requirements.txt          packages the app and model need (requirements-dev.txt: + notebook, Streamlit example)
+vercel.json               Vercel deployment (entry point server:app)
 data/                     organiser files (+ prices/)
 docs/                     sample claim, screenshots
 notebooks/                data exploration
@@ -233,6 +234,8 @@ python -m scripts.make_claim_package              # email + PDF for the demo dat
 python -m src.backtest --no-extras                # references-only model, for comparison
 docker build -t windgap . && docker run -p 7860:7860 windgap   # same app in a container -> http://localhost:7860
 ```
+
+**Vercel.** The repo deploys to Vercel as is (Python preset): `server.py` exposes a WSGI `app` that runs the same request handler, and the PDF report travels inside the claim response, so it works when requests land on different server instances. The first request after a pause takes a few seconds while the data loads.
 
 ---
 
