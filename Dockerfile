@@ -9,8 +9,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
 RUN useradd -m -u 1000 user
 WORKDIR /app
 
-COPY requirements-app.txt .
-RUN pip install --no-cache-dir -r requirements-app.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=user server.py ./
 COPY --chown=user src ./src

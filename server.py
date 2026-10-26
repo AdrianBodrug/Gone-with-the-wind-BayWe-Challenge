@@ -4,6 +4,7 @@
     python server.py --port 8080 --data data
     python server.py --reload         # re-import src/ on every request (while changing the model)
     HOST=0.0.0.0 PORT=7860 python server.py   # reachable from other machines (used by the Dockerfile)
+    server:app                        # WSGI entry point, used by Vercel (vercel.json)
 
 GET  /             the page, switched to the backend engine
 GET  /health       status + turbines the server has on disk
@@ -115,6 +116,39 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         if self.command == "POST" or not str(args[1]).startswith("2"):
             super().log_message(fmt, *args)
+
+
+def app(environ, start_response):
+    """WSGI entry point (Vercel's Python preset loads `server:app`): runs the request through Handler.
+
+    The data folder is loaded once per server instance, on the first request.
+    """
+    import io
+    if Handler.store is None:
+        os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")     # only /tmp is writable on Vercel
+        Handler.store = src.webapi.Store(os.environ.get("WINDGAP_DATA", str(ROOT / "data")))
+    n = int(environ.get("CONTENT_LENGTH") or 0)
+    body = environ["wsgi.input"].read(n) if n else b""
+    query = environ.get("QUERY_STRING", "")
+    h = Handler.__new__(Handler)                  # no socket: feed the request in, read the response out
+    h.command, h.request_version, h.requestline = environ["REQUEST_METHOD"], "HTTP/1.1", ""
+    h.path = (environ.get("PATH_INFO") or "/") + (f"?{query}" if query else "")
+    h.headers = {"Content-Length": str(len(body)), "Content-Type": environ.get("CONTENT_TYPE", "")}
+    h.client_address = (environ.get("REMOTE_ADDR", ""), 0)
+    h.rfile, h.wfile = io.BytesIO(body), io.BytesIO()
+    method = getattr(h, f"do_{h.command}", None)
+    if method is None:
+        start_response("405 Method Not Allowed", [("Content-Type", "text/plain")])
+        return [b"method not allowed"]
+    method()
+    raw = h.wfile.getvalue()
+    head, _, payload = raw.partition(b"\r\n\r\n")
+    lines = head.decode("latin-1").split("\r\n")
+    status = lines[0].split(" ", 1)[1]
+    headers = [tuple(x.split(": ", 1)) for x in lines[1:] if ": " in x]
+    headers = [(k, v) for k, v in headers if k.lower() not in ("server", "date")]
+    start_response(status, headers)
+    return [payload]
 
 
 def main():

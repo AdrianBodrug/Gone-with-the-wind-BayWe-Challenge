@@ -18,6 +18,7 @@ form text is instant; only the email/PDF are rebuilt.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import re
@@ -157,7 +158,10 @@ def claim(payload, store) -> dict:
                    "hours": result.duration_h},
         "valuation": vals,
         "email": {"subject": pkg["email_subject"], "body": pkg["email_body"]},
-        "files": {"report": f"/api/claim/{cid}/{report_name}"},
+        # the PDF also travels inline, so the page works when a second request may hit another
+        # server instance (Vercel); locally the page can still use the /api/claim/<id>/<file> link
+        "files": {"report": f"/api/claim/{cid}/{report_name}", "report_name": report_name,
+                  "report_b64": base64.b64encode(_files[cid][report_name]).decode()},
     }
     return _clean(out)
 

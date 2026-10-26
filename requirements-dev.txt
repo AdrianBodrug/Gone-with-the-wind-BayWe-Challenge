@@ -1,0 +1,6 @@
+# Everything in requirements.txt plus the notebook (notebooks/) and the Streamlit example (examples/)
+-r requirements.txt
+streamlit>=1.50
+plotly>=5.18
+scikit-learn>=1.3
+ipykernel>=6.25
