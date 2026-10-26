@@ -26,6 +26,7 @@ from fpdf import FPDF  # noqa: E402
 from jinja2 import Environment, FileSystemLoader  # noqa: E402
 
 from .pricing import MODE_ALIASES, MODE_LABELS, Valuation, value_all  # noqa: E402
+from .backtest import SHOWN_WEEK  # noqa: E402
 from .schema import AssessmentResult, ClaimInfo  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,6 +90,18 @@ def _mean_metric(result, key):
     return float(np.mean([t.metrics[key] for t in result.turbines]))
 
 
+def _accuracy_text(result) -> dict:
+    """Wind RMSE for the email: the fully held-out validation week if every turbine has it,
+    else the selection period (model fitted without it, but settings chosen on it)."""
+    val = [t.metrics.get("val_ws_rmse") for t in result.turbines]
+    if val and all(v is not None and np.isfinite(v) for v in val):
+        v0, v1 = SHOWN_WEEK
+        return dict(acc_ws_rmse=f"{np.mean(val):.2f}",
+                    acc_basis=f"on the {v0:%d.%m.}–{v1:%d.%m.%Y} validation week, which was held out from the model entirely")
+    return dict(acc_ws_rmse=f"{_mean_metric(result, 'bt_ws_rmse'):.2f}",
+                acc_basis="on a 6-day selection period the model was not fitted on")
+
+
 def primary_mode(info: ClaimInfo) -> str:
     return MODE_ALIASES.get(info.valuation_mode or "market", info.valuation_mode or "market")
 
@@ -129,6 +142,7 @@ def build_context(result: AssessmentResult, info: ClaimInfo,
         waiting_period_h=None, price=None, price_basis=info.price_basis,
         method_summary=result.method_summary,
         bt_ws_rmse=f"{_mean_metric(result, 'bt_ws_rmse'):.2f}",
+        **_accuracy_text(result),
         bt_energy_err=f"{_mean_metric(result, 'bt_abs_energy_err_pct'):.0f}",
         n_windows=int(min(t.metrics["n_backtest_windows"] for t in result.turbines)),
         report_filename=report_filename, data_filename=data_filename,
@@ -583,9 +597,11 @@ def build_report_pdf(result: AssessmentResult, info: ClaimInfo, path: str | Path
     pdf.grid_table(["Turbine", "Wind RMSE", "Wind MAE", "Power RMSE", "|Energy err.| %",
                     "Val. wind RMSE", "Val. energy %"], acc, [22, 24, 22, 26, 28, 28, 28], size=8)
     n_win = ctx["n_windows"]
-    pdf.caption(f"First four columns: cross-validation over {n_win} historical 3-day blocks (model refitted "
-                "without each block, then scored on it). 'Val.' columns: the 4–9 Sep validation week, held out "
-                "entirely ('–' = not available for this data). Wind in m/s, power in kW, energy error = deviation of summed energy.")
+    pdf.caption("Wind and power columns: the 6-day selection period (the shown test week, or the days next to the "
+                "outage if it overlaps), model fitted without it but settings chosen on it, so slightly optimistic. "
+                f"|Energy err.| %: mean over {n_win} historical 3-day blocks the model was not fitted on. "
+                "'Val.' columns: the 4–9 Sep validation week, held out entirely, settings included ('–' = not "
+                "available for this data). Wind in m/s, power in kW, energy error = deviation of summed energy.")
     vb = chart_validation(result)
     if vb:
         pdf.image_buf(vb)

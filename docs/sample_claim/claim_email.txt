@@ -12,22 +12,22 @@ Affected turbines: T1, T2, T3 (4.5 MW rated power each).
 ESTIMATED ENERGY YIELD LOSS
 Because the turbines' own wind measurements are unavailable for this period, we reconstructed the wind conditions from reference wind farms nearby and applied the turbines' power curves.
 
-  Estimated lost energy, wind farm total (P50):  311.0 MWh
-  Likely range (P10 – P90):                       272.7 – 355.5 MWh
+  Estimated lost energy, wind farm total (P50):  312.0 MWh
+  Likely range (P10 – P90):                       260.8 – 351.3 MWh
 
 VALUE OF THE LOST ENERGY
 Depending on how the wind farm's electricity is remunerated, the lost revenue is approximately:
 
-  Day-ahead market price:                    EUR 41,539  (range EUR 36,418 – 47,474)
-  EEG (market price + 0.00 EUR/MWh premium): EUR 41,539  (range EUR 36,418 – 47,474)
-  PPA, fixed price (73.13 EUR/MWh):          EUR 22,745  (range EUR 19,942 – 25,995)
+  Day-ahead market price:                    EUR 41,938  (range EUR 35,059 – 47,225)
+  EEG (market price + 0.00 EUR/MWh premium): EUR 41,938  (range EUR 35,059 – 47,225)
+  PPA, fixed price (73.13 EUR/MWh):          EUR 22,814  (range EUR 19,072 – 25,691)
 
 - EEG premium = max(0, reference value 73.30 EUR/MWh − monthly market value of onshore wind (2026-09: 109.40 EUR/MWh, German average, not the price of this outage)); the market value was above the reference value, so no premium was due and EEG equals the day-ahead value.
 - Market benchmarks used where the contract price was not provided: EEG reference value 73.30 EUR/MWh, PPA price 73.13 EUR/MWh – to be replaced by the actual contract values.
 
 METHOD AND ACCURACY
-For each affected turbine, the wind speed during the outage was reconstructed as a weighted sum of wind speeds measured at reference turbines in other wind farms (H1, H2, H3, H4, H5, O1, O2). Each reference is first shifted by the time delay that best matches the target turbine and smoothed over 130 minutes; all weights are forced to be non-negative. References and extra terms (wind-direction correction curve, wind direction, turbulence) were kept only where they improved accuracy in cross-validation over 3-day blocks of history. Lost energy is the turbine power curve averaged over the model's historical error distribution.
-On historical periods where actual measurements are known, the method reconstructed wind speed with a typical error of 1.14 m/s (RMSE, cross-validated on 29 historical 3-day blocks) and the energy over a 3-day window with a typical deviation of ±9%. Full details, charts and the input-data fingerprints are in the attached report.
+For each affected turbine, the wind speed during the outage was reconstructed as a weighted sum of wind speeds measured at reference turbines in other wind farms (H1, H2, H5, O2). Each reference is first shifted by the time delay that best matches the target turbine and smoothed over 30 to 130 minutes (chosen per turbine); all weights are forced to be non-negative. The smoothing, the references and the extra terms (wind-direction correction curve, air pressure, time-of-day dependent slope, 3-hour temperature change, turbulence intensity, turbulence) were selected step by step on the organisers' shown test week (4-9 Sep) with the model fitted without that week, and kept only where they lowered the wind and power errors there. Lost energy is the turbine power curve averaged over the model's historical error distribution.
+Tested on periods where the actual measurements are known, the method reconstructed wind speed with a typical error of 1.35 m/s (RMSE, on the 04.09.–09.09.2026 validation week, which was held out from the model entirely). Over 29 historical 3-day blocks the model was not fitted on, the energy deviated from the measured value by ±11% on average. Full details, charts and the input-data fingerprints are in the attached report.
 
 PLEASE NOTE
 This is an estimate based on reference data. Since the outage concerned the communication connection, we will provide the grid operator's metering data for the period to confirm that no energy was fed into the grid. We will update this notification if the final figures differ.

@@ -28,7 +28,7 @@ VALUE OF THE LOST ENERGY
 {% endif %}
 METHOD AND ACCURACY
 {{ method_summary }}
-On historical periods where actual measurements are known, the method reconstructed wind speed with a typical error of {{ bt_ws_rmse }} m/s (RMSE, cross-validated on {{ n_windows }} historical 3-day blocks) and the energy over a 3-day window with a typical deviation of ±{{ bt_energy_err }}%. Full details, charts and the input-data fingerprints are in the attached report.
+Tested on periods where the actual measurements are known, the method reconstructed wind speed with a typical error of {{ acc_ws_rmse }} m/s (RMSE, {{ acc_basis }}). Over {{ n_windows }} historical 3-day blocks the model was not fitted on, the energy deviated from the measured value by ±{{ bt_energy_err }}% on average. Full details, charts and the input-data fingerprints are in the attached report.
 
 PLEASE NOTE
 This is an estimate based on reference data. Since the outage concerned the communication connection, we will provide the grid operator's metering data for the period to confirm that no energy was fed into the grid. We will update this notification if the final figures differ.
