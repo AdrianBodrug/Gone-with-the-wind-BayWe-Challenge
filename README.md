@@ -4,6 +4,8 @@
 
 🥈 **2nd place, BayWa r.e. challenge** · WATT THE HACK 2026, Munich
 
+**Live demo: [gone-with-the-wind-bay-we-challenge.vercel.app](https://gone-with-the-wind-bay-we-challenge.vercel.app/)** (the first analysis after a pause takes a few seconds while the data loads)
+
 ## Problem statement and WindGap Solution
 
 When the communication link to a wind farm drops, the farm may stop feeding in, and its own wind measurements disappear with the link. To file a business-interruption insurance claim, the operator still has to say how much energy was lost. Today an analyst estimates it by hand from a neighbouring farm's wind data.
@@ -16,7 +18,7 @@ WindGap automates that estimate:
 4. It shows the fitted model so the results can be reproducible using the learnt linear equation for each wind turbine that faces power loss.
 5. It drafts the insurance email and a detailed PDF report.
 
-Everything runs locally in the browser.
+It runs in the browser: try the [live demo](https://gone-with-the-wind-bay-we-challenge.vercel.app/) or run it on your own computer (below).
 
 ![Start page](docs/img/start.png)
 
