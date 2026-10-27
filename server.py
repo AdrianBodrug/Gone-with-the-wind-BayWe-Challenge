@@ -17,6 +17,7 @@ import argparse
 import importlib
 import json
 import os
+import threading
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -36,9 +37,23 @@ PAGE = ROOT / "templates" / "windgap.html"
 BACKEND_JS = '<script>window.WINDGAP_BACKEND={base:"",path:"/api/analyze"};</script>'
 
 
+_STORE_LOCK = threading.Lock()
+
+
 class Handler(BaseHTTPRequestHandler):
     store = None
     reload = False
+
+    @classmethod
+    def ensure_store(cls):
+        """Load the data folder on first use. `python server.py` sets the store in main(); hosts that
+        import this module and call Handler (or app) directly - e.g. Vercel - load it here."""
+        if cls.store is None:
+            with _STORE_LOCK:
+                if cls.store is None:
+                    os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")     # only /tmp is writable there
+                    cls.store = src.webapi.Store(os.environ.get("WINDGAP_DATA", str(ROOT / "data")))
+        return cls.store
 
     def _send(self, code, body, ctype="application/json; charset=utf-8"):
         data = body.encode() if isinstance(body, str) else body
@@ -57,6 +72,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        self.ensure_store()
         path = self.path.split("?")[0]
         if path in ("/", "/index.html"):
             html = PAGE.read_text(encoding="utf-8").replace("</head>", BACKEND_JS + "</head>", 1)
@@ -82,6 +98,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, json.dumps({"error": "not found"}))
 
     def do_POST(self):
+        self.ensure_store()
         route = self.path.split("?")[0]
         if route not in ("/api/analyze", "/api/claim", "/api/export"):
             return self._send(404, json.dumps({"error": "not found"}))
@@ -119,14 +136,12 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def app(environ, start_response):
-    """WSGI entry point (Vercel's Python preset loads `server:app`): runs the request through Handler.
+    """WSGI entry point: runs the request through Handler (Vercel may also use Handler directly).
 
     The data folder is loaded once per server instance, on the first request.
     """
     import io
-    if Handler.store is None:
-        os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")     # only /tmp is writable on Vercel
-        Handler.store = src.webapi.Store(os.environ.get("WINDGAP_DATA", str(ROOT / "data")))
+    Handler.ensure_store()
     n = int(environ.get("CONTENT_LENGTH") or 0)
     body = environ["wsgi.input"].read(n) if n else b""
     query = environ.get("QUERY_STRING", "")
